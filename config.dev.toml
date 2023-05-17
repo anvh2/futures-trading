@@ -1,0 +1,29 @@
+[server]
+  port = 8080
+
+[trading]
+  log_path = "./logs/trading.log"
+
+[redis]
+  addr = "localhost:6379"
+
+[market]
+  intervals = ["5m", "15m"]
+
+[chart]
+  [chart.candles]
+    limit = 500
+
+[binance]
+  [binance.rate_limit]
+    requests = 200
+    duration = "1m"
+
+[notify]
+  [notify.channels]
+    "notify.channels.futures_announcement" = 1630847448
+  [notify.config]
+    expiration = "10m"
+
+[telegram]
+  token = "6027005687:AAG2jz4Gr32dv3YnV0hMJ3NY8rs-qK3bsNY"

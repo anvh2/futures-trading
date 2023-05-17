@@ -1,0 +1,10 @@
+/futures-trading
+Library
+.cache
+tmp
+logs
+.vscode
+.docker
+.env
+python
+go/pkg/mod/*

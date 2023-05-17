@@ -1,0 +1,14 @@
+services:
+  futures-trading:
+    container_name: futures-trading
+    build:
+      context: .
+      args:
+        - VERSION=v1.0.1
+      dockerfile: ./Dockerfile
+    image: anvh2/futures-trading:v1.0.1
+    volumes:
+      - "./logs:/logs"
+    ports:
+      - "8080:8080"
+    restart: always

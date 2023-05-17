@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package v1.signal;
+
+option go_package = "./api/v1/signal;signal";
+
+import "google/api/annotations.proto";
+
+// option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+//   info: {
+//     title: "Signal API";
+//     version: "1.0";
+//     description: "";
+//     contact: {
+//       name: "Futures Signal Project";
+//       url: "NA";
+//       email: "NA";
+//     };
+//     license: {
+//       name: "NA";
+//       url: "NA";
+//     };
+//   };
+//   schemes: HTTPS;
+//   consumes: "application/json";
+//   produces: "application/json";
+// };
+
+service SignalService {
+  rpc PerformSignalAnalysis (PerformSignalRequestAnalysis) returns (PerformSignalResponseAnalysis) {
+    option (google.api.http) = {
+      post: "/v1/signal/perform"
+      body: "*"
+    };
+  }
+  rpc ChangeTradingSettings (ChangeTradingSettingsRequest) returns (ChangeTradingSettingsResponse) {
+    option (google.api.http) = {
+      post: "/v1/signal/settings/change"
+      body: "*"
+    };
+  }
+}
+
+message PerformSignalRequestAnalysis {
+  string symbol = 1;
+  int64 timestamp = 2;
+}
+
+message PerformSignalResponseAnalysis {
+  string message = 1;
+}
+
+message ChangeTradingSettingsRequest {
+  string interval = 1;
+  bool off_notify = 2;
+}
+
+message ChangeTradingSettingsResponse {
+
+}

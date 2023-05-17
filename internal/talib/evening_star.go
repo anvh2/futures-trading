@@ -1,0 +1,3 @@
+package talib
+
+func EveningStar() {}
