@@ -35,13 +35,13 @@ func (s *Crawler) Start() error {
 		}
 	}()
 
-	if err := s.fetchMarketSummary(); err != nil {
+	if err := s.fetchMarketSummary(context.Background()); err != nil {
 		return err
 	}
 
-	s.retrying()
-	s.consuming()
-	s.notifying()
+	s.StartRetry()
+	s.StartConsumption()
+	s.StartNotification()
 
 	return nil
 }
@@ -85,7 +85,7 @@ func (s *Crawler) fetchExchange() error {
 	return nil
 }
 
-func (s *Crawler) fetchMarketSummary() error {
+func (s *Crawler) fetchMarketSummary(ctx context.Context) error {
 	var (
 		wg    = &sync.WaitGroup{}
 		total = int32(0)
@@ -105,9 +105,6 @@ func (s *Crawler) fetchMarketSummary() error {
 			defer wg.Done()
 
 			for _, symbol := range s.exchangeCache.Symbols() {
-				ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-				defer cancel()
-
 				resp, err := s.binance.GetCandlesticks(ctx, symbol, interval, viper.GetInt("chart.candles.limit"), 0, 0)
 				if err != nil {
 					s.logger.Error("[Crawling] failed to get klines data", zap.String("symbol", symbol), zap.String("interval", interval), zap.Error(err))

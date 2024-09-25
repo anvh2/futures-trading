@@ -153,16 +153,16 @@ func (s *Server) Start() error {
 		sig := <-sigs
 		fmt.Println("Exiting...: ", sig)
 
-		close(s.quitChannel)
-
-		s.orderer.Stop()
-		s.analyzer.Stop()
-		s.crawler.Stop()
-
 		s.server.grpc.Stop()
 		s.server.http.Close()
 
 		cancel()
+		close(s.quitChannel)
+
+		s.crawler.Stop()
+		s.analyzer.Stop()
+		s.orderer.Stop()
+
 		close(done)
 	}()
 

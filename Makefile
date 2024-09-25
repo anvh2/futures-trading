@@ -21,7 +21,7 @@ docker-compose:
 	docker-compose up --detach --build
 
 run-local:
-	go run main.go start --config config.dev.toml --env .env
+	go run main.go start --config config.dev.toml --env .env.local
 
 rsync:
 	rsync -avz futures-trading *.toml .env runserver* admin@18.143.73.197:/server/futures-trading
