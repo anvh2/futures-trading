@@ -59,6 +59,6 @@ func New(
 }
 
 func (s *Analyzer) Stop() {
-	s.worker.Stop()
 	close(s.quitChannel)
+	s.worker.Stop()
 }

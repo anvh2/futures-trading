@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -148,7 +149,9 @@ func (w *Worker) processMessage(message interface{}) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	w.process(ctx, message)
+	if err := w.process(ctx, message); err != nil {
+		fmt.Println(err)
+	}
 }
 
 func (w *Worker) pollingMessage(idx int32) {

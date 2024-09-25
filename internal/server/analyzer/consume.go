@@ -26,9 +26,6 @@ func (s *Analyzer) Start() error {
 			select {
 			case <-ticker.C:
 				for _, symbol := range s.exchangeCache.Symbols() {
-					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-					defer cancel() // context leak
-
 					summary, err := s.marketCache.CandleSummary(symbol)
 					if err != nil {
 						continue
@@ -72,7 +69,7 @@ func (s *Analyzer) Start() error {
 						}
 					}
 
-					s.worker.SendJob(ctx, message)
+					s.worker.SendJob(context.Background(), message)
 				}
 
 			case <-s.quitChannel:

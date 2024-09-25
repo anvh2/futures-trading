@@ -5,6 +5,7 @@ tmp
 logs
 .vscode
 .docker
-.env
+.env.local
 python
 go/pkg/mod/*
+vendor

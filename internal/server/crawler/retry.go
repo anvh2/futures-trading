@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (s *Crawler) retrying() {
+func (s *Crawler) StartRetry() {
 	for i := 0; i < 4; i++ {
 		go func() {
 			defer func() {

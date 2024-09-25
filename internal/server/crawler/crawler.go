@@ -16,7 +16,6 @@ type Crawler struct {
 	logger        *logger.Logger
 	binance       *binance.Binance
 	notify        *telegram.TelegramBot
-	cache         cache.Basic
 	marketCache   cache.Market
 	exchangeCache cache.Exchange
 	channel       *channel.Channel
