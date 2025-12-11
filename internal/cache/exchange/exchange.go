@@ -4,7 +4,7 @@ import (
 	"sync"
 
 	"github.com/anvh2/futures-trading/internal/cache/errors"
-	"github.com/anvh2/futures-trading/internal/logger"
+	"github.com/anvh2/futures-trading/internal/libs/logger"
 )
 
 type Exchange struct {

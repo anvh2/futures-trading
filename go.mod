@@ -7,13 +7,13 @@ toolchain go1.23.1
 require (
 	github.com/adshao/go-binance/v2 v2.4.1
 	github.com/bitly/go-simplejson v0.5.0
-	github.com/cinar/indicator v1.2.24
-	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
-	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
+	// github.com/cinar/indicator v1.2.24
+	// github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
+	// github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.15.2
 	github.com/joho/godotenv v1.5.1
 	github.com/mitchellh/mapstructure v1.5.0
-	github.com/prometheus/client_golang v1.11.1
+	// github.com/prometheus/client_golang v1.11.1
 	github.com/soheilhy/cmux v0.1.5
 	github.com/spf13/cobra v1.7.0
 	github.com/spf13/viper v1.15.0
@@ -25,6 +25,13 @@ require (
 	google.golang.org/grpc v1.54.0
 	google.golang.org/protobuf v1.30.0
 	gopkg.in/telebot.v3 v3.1.3
+)
+
+require (
+	github.com/cinar/indicator v1.3.0
+	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
+	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
+	github.com/prometheus/client_golang v1.11.1
 )
 
 require (

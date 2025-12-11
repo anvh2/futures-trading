@@ -20,9 +20,9 @@ type Exchange interface {
 }
 
 //go:generate moq -pkg cachemock -out ./mocks/basic_mock.go . Basic
-type Basic interface {
-	Set(key string, value interface{})
-	Get(key string) interface{}
-	Exs(key string) bool
-	SetEX(key string, value interface{}) (interface{}, bool)
-}
+// type Basic interface {
+// 	Set(key string, value interface{})
+// 	Get(key string) interface{}
+// 	Exs(key string) bool
+// 	SetEX(key string, value interface{}) (interface{}, bool)
+// }

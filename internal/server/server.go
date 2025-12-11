@@ -13,16 +13,16 @@ import (
 	"github.com/anvh2/futures-trading/internal/cache"
 	"github.com/anvh2/futures-trading/internal/cache/exchange"
 	"github.com/anvh2/futures-trading/internal/cache/market"
-	"github.com/anvh2/futures-trading/internal/channel"
+	"github.com/anvh2/futures-trading/internal/externals/binance"
+	"github.com/anvh2/futures-trading/internal/externals/telegram"
+	"github.com/anvh2/futures-trading/internal/libs/channel"
+	"github.com/anvh2/futures-trading/internal/libs/logger"
 	"github.com/anvh2/futures-trading/internal/libs/queue"
-	"github.com/anvh2/futures-trading/internal/logger"
-	"github.com/anvh2/futures-trading/internal/server/analyzer"
-	"github.com/anvh2/futures-trading/internal/server/crawler"
 	"github.com/anvh2/futures-trading/internal/server/handler"
-	"github.com/anvh2/futures-trading/internal/server/orderer"
-	"github.com/anvh2/futures-trading/internal/services/binance"
-	"github.com/anvh2/futures-trading/internal/services/telegram"
-	"github.com/anvh2/futures-trading/internal/settings"
+	analyzer "github.com/anvh2/futures-trading/internal/services/analyze"
+	crawler "github.com/anvh2/futures-trading/internal/services/crawl"
+	orderer "github.com/anvh2/futures-trading/internal/services/order"
+	"github.com/anvh2/futures-trading/internal/services/settings"
 	pb "github.com/anvh2/futures-trading/pkg/api/v1/signal"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
@@ -77,7 +77,7 @@ func New() *Server {
 
 	notify, err := telegram.NewTelegramBot(logger, viper.GetString("telegram.token"))
 	if err != nil {
-		log.Fatal("failed to new chat bot", err)
+		// log.Fatal("failed to new chat bot", err)
 	}
 
 	binance := binance.New(logger, false)

@@ -3,8 +3,8 @@ package market
 import (
 	"sync"
 
-	"github.com/anvh2/futures-trading/internal/cache/circular"
 	"github.com/anvh2/futures-trading/internal/cache/errors"
+	"github.com/anvh2/futures-trading/internal/libs/cache/circular"
 )
 
 type Market struct {
