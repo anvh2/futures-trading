@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/anvh2/futures-trading/internal/cache"
+	"github.com/anvh2/futures-trading/internal/config"
 	"github.com/anvh2/futures-trading/internal/externals/binance"
 	"github.com/anvh2/futures-trading/internal/externals/telegram"
 	"github.com/anvh2/futures-trading/internal/libs/cache/simple"
@@ -19,6 +20,7 @@ import (
 )
 
 type Orderer struct {
+	config        config.Config
 	logger        *logger.Logger
 	binance       *binance.Binance
 	notify        telegram.Notify
@@ -32,6 +34,7 @@ type Orderer struct {
 }
 
 func New(
+	config config.Config,
 	logger *logger.Logger,
 	notify telegram.Notify,
 	marketCache cache.Market,
@@ -45,6 +48,7 @@ func New(
 	}
 
 	orderer := &Orderer{
+		config:        config,
 		logger:        logger,
 		binance:       binance.New(logger, true),
 		notify:        notify,
@@ -75,12 +79,13 @@ func (o *Orderer) Start() error {
 		for {
 			select {
 			case <-ticker.C:
-				msg, err := o.queue.Peak("orderer")
+				msg, err := o.queue.Consume(context.Background(), o.config.Topics.SymbolsTradeIntentTopic, "group1")
 				if err != nil {
 					continue
 				}
 
 				o.worker.SendJob(context.Background(), msg.Data)
+				msg.Commit(context.Background())
 
 			case <-o.quitChannel:
 				return

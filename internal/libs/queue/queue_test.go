@@ -1,9 +1,10 @@
 package queue
 
 import (
-	"fmt"
+	"context"
 	"testing"
-	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestQueue(t *testing.T) {
@@ -14,7 +15,24 @@ func TestQueue(t *testing.T) {
 		name string
 	}
 
-	q.Push(&sample{id: 1, name: "foo"}, time.Second)
-	data, err := q.Peak("bar")
-	fmt.Println(data.Data, err)
+	q.Push(context.Background(), "foo", &sample{id: 1, name: "foo"})
+	data, err := q.Consume(context.Background(), "bar", "group1")
+	assert.Nil(t, data)
+	assert.Equal(t, ErrNoMessageAvailable, err)
+
+	data, err = q.Consume(context.Background(), "foo", "group1")
+	assert.Nil(t, err)
+	assert.Equal(t, &sample{id: 1, name: "foo"}, data.Data)
+
+	offset := data.Offset
+
+	data, err = q.Consume(context.Background(), "foo", "group1")
+	assert.Nil(t, data)
+	assert.Equal(t, ErrMustCommitBeforeConsuming, err)
+
+	q.Commit(context.Background(), "foo", "group1", offset)
+
+	data, err = q.Consume(context.Background(), "foo", "group1")
+	assert.Nil(t, data)
+	assert.Equal(t, ErrNoMessageAvailable, err)
 }

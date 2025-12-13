@@ -1,17 +1,18 @@
-package crawler
+package market
 
 import (
 	"context"
 	"runtime/debug"
 
 	"github.com/adshao/go-binance/v2/futures"
-	"github.com/anvh2/futures-trading/internal/cache/errors"
+	"github.com/anvh2/futures-trading/internal/cache/exchange"
+	"github.com/anvh2/futures-trading/internal/cache/market"
 	"github.com/anvh2/futures-trading/internal/models"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
 
-func (s *Crawler) StartConsumption() error {
+func (s *Market) Watch() error {
 	ready := make(chan bool)
 
 	go func() {
@@ -40,7 +41,7 @@ func (s *Crawler) StartConsumption() error {
 	return nil
 }
 
-func (s *Crawler) processCandlesConsumption(ctx context.Context, pair map[string]string) (done chan struct{}, stop chan struct{}) {
+func (s *Market) processCandlesConsumption(ctx context.Context, pair map[string]string) (done chan struct{}, stop chan struct{}) {
 	done, stop, err := futures.WsCombinedKlineServe(pair, s.handleCandlesConsumption, s.handleConsumeError)
 	if err != nil {
 		s.logger.Fatal("[CandlesConsumption] failed to connect to klines stream data", zap.Error(err))
@@ -63,20 +64,20 @@ func (s *Crawler) processCandlesConsumption(ctx context.Context, pair map[string
 	return
 }
 
-func (s *Crawler) handleCandlesConsumption(event *futures.WsKlineEvent) {
+func (s *Market) handleCandlesConsumption(event *futures.WsKlineEvent) {
 	_, err := s.exchangeCache.Get(event.Symbol)
-	if err == errors.ErrorSymbolNotFound {
+	if err == exchange.ErrorSymbolNotFound {
 		s.logger.Info("[CandlesConsumption] no need to handle this symbol", zap.String("symbol", event.Symbol))
 		return
 	}
 
 	chart, err := s.marketCache.CandleSummary(event.Symbol)
-	if err == errors.ErrorChartNotFound {
+	if err == market.ErrorChartNotFound {
 		chart = s.marketCache.CreateSummary(event.Symbol)
 	}
 
 	candles, err := chart.Candles(event.Kline.Interval)
-	if err == errors.ErrorCandlesNotFound {
+	if err == market.ErrorCandlesNotFound {
 		return
 	}
 
@@ -114,6 +115,6 @@ func (s *Crawler) handleCandlesConsumption(event *futures.WsKlineEvent) {
 	chart.CreateCandle(event.Kline.Interval, candle)
 }
 
-func (s *Crawler) handleConsumeError(err error) {
+func (s *Market) handleConsumeError(err error) {
 	s.logger.Error("[CandlesConsumption] failed to recieve data", zap.Error(err))
 }

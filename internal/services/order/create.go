@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"github.com/adshao/go-binance/v2/futures"
-	"github.com/anvh2/futures-trading/internal/helpers"
 	"github.com/anvh2/futures-trading/internal/libs/talib"
 	"github.com/anvh2/futures-trading/internal/models"
 	"github.com/anvh2/futures-trading/internal/services/settings"
@@ -39,22 +38,22 @@ func (s *Orderer) create(ctx context.Context, symbol string, stoch *models.Stoch
 		closeSide = futures.SideTypeSell
 	}
 
-	price, err := s.appraise(ctx, symbol, positionSide)
+	// price, err := s.appraise(ctx, symbol, positionSide)
 
-	exchange, err := s.exchangeCache.Get(symbol)
-	if err != nil {
-		return nil, err
-	}
+	// exchange, err := s.exchangeCache.Get(symbol)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	priceFilter, err := exchange.GetPriceFilter()
-	if err != nil {
-		return nil, err
-	}
+	// priceFilter, err := exchange.GetPriceFilter()
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	lotFilter, err := exchange.GetLotSizeFilter()
-	if err != nil {
-		return nil, err
-	}
+	// lotFilter, err := exchange.GetLotSizeFilter()
+	// if err != nil {
+	// 	return nil, err
+	// }
 
 	var orders = []*models.Order{}
 
@@ -62,25 +61,25 @@ func (s *Orderer) create(ctx context.Context, symbol string, stoch *models.Stoch
 	case settings.TradingStrategyInstantNoodles:
 		orders = []*models.Order{
 			{
-				Symbol:           symbol,
-				Side:             sideType,
-				PositionSide:     positionSide,
-				OrderType:        futures.OrderTypeLimit,
-				TimeInForce:      futures.TimeInForceTypeGTC,
-				Quantity:         helpers.AlignQuantityToString(price.Quantity, lotFilter.StepSize),
-				Price:            helpers.AlignPriceToString(price.Entry, priceFilter.TickSize),
+				Symbol:       symbol,
+				Side:         sideType,
+				PositionSide: positionSide,
+				OrderType:    futures.OrderTypeLimit,
+				TimeInForce:  futures.TimeInForceTypeGTC,
+				// Quantity:         helpers.AlignQuantityToString(price.Quantity, lotFilter.StepSize),
+				// Price:            helpers.AlignPriceToString(price.Entry, priceFilter.TickSize),
 				WorkingType:      futures.WorkingTypeMarkPrice,
 				NewOrderRespType: futures.NewOrderRespTypeRESULT,
 			},
 			// take profile
 			{
-				Symbol:           symbol,
-				Side:             closeSide,
-				PositionSide:     positionSide,
-				OrderType:        futures.OrderTypeTakeProfitMarket,
-				TimeInForce:      futures.TimeInForceTypeGTC,
-				Quantity:         helpers.AlignQuantityToString(price.Quantity, lotFilter.StepSize),
-				StopPrice:        helpers.AlignPriceToString(price.Profit, priceFilter.TickSize),
+				Symbol:       symbol,
+				Side:         closeSide,
+				PositionSide: positionSide,
+				OrderType:    futures.OrderTypeTakeProfitMarket,
+				TimeInForce:  futures.TimeInForceTypeGTC,
+				// Quantity:         helpers.AlignQuantityToString(price.Quantity, lotFilter.StepSize),
+				// StopPrice:        helpers.AlignPriceToString(price.Profit, priceFilter.TickSize),
 				WorkingType:      futures.WorkingTypeMarkPrice,
 				NewOrderRespType: futures.NewOrderRespTypeRESULT,
 			},
@@ -101,59 +100,59 @@ func (s *Orderer) create(ctx context.Context, symbol string, stoch *models.Stoch
 	case settings.TradingStrategyDollarCostAveraging:
 		orders = []*models.Order{
 			{
-				Symbol:           symbol,
-				Side:             sideType,
-				PositionSide:     positionSide,
-				OrderType:        futures.OrderTypeLimit,
-				TimeInForce:      futures.TimeInForceTypeGTC,
-				Quantity:         helpers.AlignQuantityToString(calculateQuantity(price.Entry, 30), lotFilter.StepSize),
-				Price:            helpers.AlignPriceToString(price.Entry, priceFilter.TickSize),
+				Symbol:       symbol,
+				Side:         sideType,
+				PositionSide: positionSide,
+				OrderType:    futures.OrderTypeLimit,
+				TimeInForce:  futures.TimeInForceTypeGTC,
+				// Quantity:         helpers.AlignQuantityToString(calculateQuantity(price.Entry, 30), lotFilter.StepSize),
+				// Price:            helpers.AlignPriceToString(price.Entry, priceFilter.TickSize),
 				WorkingType:      futures.WorkingTypeMarkPrice,
 				NewOrderRespType: futures.NewOrderRespTypeRESULT,
 			},
 			{
-				Symbol:           symbol,
-				Side:             sideType,
-				PositionSide:     positionSide,
-				OrderType:        futures.OrderTypeLimit,
-				TimeInForce:      futures.TimeInForceTypeGTC,
-				Quantity:         helpers.AlignQuantityToString(calculateQuantity(price.Entry*1.03, 40), lotFilter.StepSize),
-				Price:            helpers.AlignPriceToString(price.Entry*1.03, priceFilter.TickSize),
+				Symbol:       symbol,
+				Side:         sideType,
+				PositionSide: positionSide,
+				OrderType:    futures.OrderTypeLimit,
+				TimeInForce:  futures.TimeInForceTypeGTC,
+				// Quantity:         helpers.AlignQuantityToString(calculateQuantity(price.Entry*1.03, 40), lotFilter.StepSize),
+				// Price:            helpers.AlignPriceToString(price.Entry*1.03, priceFilter.TickSize),
 				WorkingType:      futures.WorkingTypeMarkPrice,
 				NewOrderRespType: futures.NewOrderRespTypeRESULT,
 			},
 			{
-				Symbol:           symbol,
-				Side:             sideType,
-				PositionSide:     positionSide,
-				OrderType:        futures.OrderTypeLimit,
-				TimeInForce:      futures.TimeInForceTypeGTC,
-				Quantity:         helpers.AlignQuantityToString(calculateQuantity(price.Entry*1.03*1.03, 50), lotFilter.StepSize),
-				Price:            helpers.AlignPriceToString(price.Entry*1.03*1.03, priceFilter.TickSize),
+				Symbol:       symbol,
+				Side:         sideType,
+				PositionSide: positionSide,
+				OrderType:    futures.OrderTypeLimit,
+				TimeInForce:  futures.TimeInForceTypeGTC,
+				// Quantity:         helpers.AlignQuantityToString(calculateQuantity(price.Entry*1.03*1.03, 50), lotFilter.StepSize),
+				// Price:            helpers.AlignPriceToString(price.Entry*1.03*1.03, priceFilter.TickSize),
 				WorkingType:      futures.WorkingTypeMarkPrice,
 				NewOrderRespType: futures.NewOrderRespTypeRESULT,
 			},
 			// take profile
 			{
-				Symbol:           symbol,
-				Side:             closeSide,
-				PositionSide:     positionSide,
-				OrderType:        futures.OrderTypeTakeProfitMarket,
-				TimeInForce:      futures.TimeInForceTypeGTC,
-				Quantity:         helpers.AlignQuantityToString(calculateStopQuantity(price.Entry, 120), lotFilter.StepSize),
-				StopPrice:        helpers.AlignPriceToString(price.Profit, priceFilter.TickSize),
+				Symbol:       symbol,
+				Side:         closeSide,
+				PositionSide: positionSide,
+				OrderType:    futures.OrderTypeTakeProfitMarket,
+				TimeInForce:  futures.TimeInForceTypeGTC,
+				// Quantity:         helpers.AlignQuantityToString(calculateStopQuantity(price.Entry, 120), lotFilter.StepSize),
+				// StopPrice:        helpers.AlignPriceToString(price.Profit, priceFilter.TickSize),
 				WorkingType:      futures.WorkingTypeMarkPrice,
 				NewOrderRespType: futures.NewOrderRespTypeRESULT,
 			},
 			// stop loss
 			{
-				Symbol:           symbol,
-				Side:             closeSide,
-				PositionSide:     positionSide,
-				OrderType:        futures.OrderTypeStopMarket,
-				TimeInForce:      futures.TimeInForceTypeGTC,
-				Quantity:         helpers.AlignQuantityToString(calculateStopQuantity(price.Entry, 120), lotFilter.StepSize),
-				StopPrice:        helpers.AlignPriceToString(price.Loss, priceFilter.TickSize),
+				Symbol:       symbol,
+				Side:         closeSide,
+				PositionSide: positionSide,
+				OrderType:    futures.OrderTypeStopMarket,
+				TimeInForce:  futures.TimeInForceTypeGTC,
+				// Quantity:         helpers.AlignQuantityToString(calculateStopQuantity(price.Entry, 120), lotFilter.StepSize),
+				// StopPrice:        helpers.AlignPriceToString(price.Loss, priceFilter.TickSize),
 				WorkingType:      futures.WorkingTypeMarkPrice,
 				NewOrderRespType: futures.NewOrderRespTypeRESULT,
 			},

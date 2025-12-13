@@ -1,4 +1,4 @@
-package crawler
+package market
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (s *Crawler) StartRetry() {
+func (s *Market) Retry() {
 	for i := 0; i < 4; i++ {
 		go func() {
 			defer func() {

@@ -1,4 +1,4 @@
-package crawler
+package market
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (s *Crawler) Start() error {
+func (s *Market) Crawl() error {
 	if err := s.fetchExchange(); err != nil {
 		return err
 	}
@@ -39,14 +39,10 @@ func (s *Crawler) Start() error {
 		return err
 	}
 
-	s.StartRetry()
-	s.StartConsumption()
-	s.StartNotification()
-
 	return nil
 }
 
-func (s *Crawler) fetchExchange() error {
+func (s *Market) fetchExchange() error {
 	resp, err := s.binance.GetExchangeInfo(context.Background())
 	if err != nil {
 		s.logger.Error("[Crawling] failed to get exchange info", zap.Error(err))
@@ -85,7 +81,7 @@ func (s *Crawler) fetchExchange() error {
 	return nil
 }
 
-func (s *Crawler) fetchMarketSummary(ctx context.Context) error {
+func (s *Market) fetchMarketSummary(ctx context.Context) error {
 	var (
 		wg    = &sync.WaitGroup{}
 		total = int32(0)
@@ -125,7 +121,7 @@ func (s *Crawler) fetchMarketSummary(ctx context.Context) error {
 				}
 
 				atomic.AddInt32(&total, 1)
-				s.logger.Info("[Crawling] cache market success", zap.String("symbol", symbol), zap.String("interval", interval), zap.Int("total", len(resp)))
+				// s.logger.Info("[Crawling] cache market success", zap.String("symbol", symbol), zap.String("interval", interval), zap.Int("total", len(resp)))
 			}
 
 		}(interval)

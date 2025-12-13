@@ -1,4 +1,4 @@
-package crawler
+package market
 
 import (
 	"github.com/anvh2/futures-trading/internal/cache"
@@ -12,7 +12,7 @@ var (
 	blacklist = map[string]bool{}
 )
 
-type Crawler struct {
+type Market struct {
 	logger        *logger.Logger
 	binance       *binance.Binance
 	notify        *telegram.TelegramBot
@@ -29,8 +29,8 @@ func New(
 	marketCache cache.Market,
 	exchangeCache cache.Exchange,
 	channel *channel.Channel,
-) *Crawler {
-	return &Crawler{
+) *Market {
+	return &Market{
 		logger:        logger,
 		binance:       binance,
 		notify:        notify,
@@ -41,6 +41,17 @@ func New(
 	}
 }
 
-func (s *Crawler) Stop() {
+func (s *Market) Start() error {
+	if err := s.Crawl(); err != nil {
+		return err
+	}
+
+	s.Retry()
+	s.Watch()
+
+	return nil
+}
+
+func (s *Market) Stop() {
 	close(s.quitChannel)
 }

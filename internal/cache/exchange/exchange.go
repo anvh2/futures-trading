@@ -3,7 +3,6 @@ package exchange
 import (
 	"sync"
 
-	"github.com/anvh2/futures-trading/internal/cache/errors"
 	"github.com/anvh2/futures-trading/internal/libs/logger"
 )
 
@@ -40,7 +39,7 @@ func (c *Exchange) Get(symbol string) (*Symbol, error) {
 
 	data, ok := c.internal[symbol]
 	if !ok {
-		return nil, errors.ErrorSymbolNotFound
+		return nil, ErrorSymbolNotFound
 	}
 
 	return data, nil

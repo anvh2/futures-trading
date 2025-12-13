@@ -9,3 +9,4 @@ logs
 python
 go/pkg/mod/*
 vendor
+/internal/archives

@@ -1,4 +1,4 @@
-package crawler
+package notify
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (s *Crawler) StartNotification() error {
+func (s *Notifier) ListenOrder() error {
 	ready := make(chan error)
 
 	go func() {
@@ -32,7 +32,7 @@ func (s *Crawler) StartNotification() error {
 	return nil
 }
 
-func (s *Crawler) processOrderConsumption(ctx context.Context) error {
+func (s *Notifier) processOrderConsumption(ctx context.Context) error {
 	listenKey, err := s.binance.GetListenKey(ctx)
 	if err != nil {
 		s.logger.Error("[OrderConsumption] failed to get listen key", zap.Error(err))
@@ -74,7 +74,7 @@ func (s *Crawler) processOrderConsumption(ctx context.Context) error {
 	return nil
 }
 
-func (s *Crawler) handleOrderConsumption(ctx context.Context, event *futures.WsUserDataEvent) {
+func (s *Notifier) handleOrderConsumption(ctx context.Context, event *futures.WsUserDataEvent) {
 	order := event.OrderTradeUpdate
 
 	msg := fmt.Sprintf("%s #%s: %s | Price: %s | Quantity: %s | Status: %s", order.PositionSide, order.Symbol, order.Side, order.StopPrice, order.OriginalQty, order.Status)

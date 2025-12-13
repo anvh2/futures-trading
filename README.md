@@ -1,17 +1,33 @@
 # Futures Trading
 
-#### _Trading bot is written in Go._
+A safety-first **Go-based Binance Futures trading bot** using a Maker / Checker / Executor architecture.
 
-## Installation
+## Overview
 
-### Install softwares
-- Docker
+```mermaid
+graph TD
+    market[Market]
+    analyze[Analyze & Signals]
+    maker[Maker/<br/>Decision Engine]
+    checker[Checker/<br/>Risk Engine]
+    executor[Executor/<br/>Order Engine]
+    notify[Notify]
+    state[(State)]
+    guarder[Guarder/<br/>Safety & Circuit Breaker]
+    exchange[Exchange<br/>Binance]
 
-### Run Bot
-```sh
-git clone github.com/anvh2/futures-trading
-cd futures-trading && make deploy
+    market --> analyze --> maker
+    maker -->|Intent| checker
+    checker -->|Approved| executor
+    executor -->|Place| exchange
+
+    executor --> state
+
+    maker --> state
+    checker --> state
+
+    guarder -.-> maker
+    guarder -.-> checker
+    guarder -.-> executor
+    exchange --> notify
 ```
-
-## Development
-> Note: that this bot is under development.

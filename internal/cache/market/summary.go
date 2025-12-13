@@ -4,7 +4,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anvh2/futures-trading/internal/cache/errors"
 	"github.com/anvh2/futures-trading/internal/libs/cache/circular"
 	"github.com/anvh2/futures-trading/internal/models"
 )
@@ -36,7 +35,7 @@ func (m *CandleSummary) Candles(interval string) (*circular.Cache, error) {
 	defer m.mutex.RUnlock()
 
 	if m.cache[interval] == nil {
-		return nil, errors.ErrorCandlesNotFound
+		return nil, ErrorCandlesNotFound
 	}
 
 	return m.cache[interval].Candles, nil

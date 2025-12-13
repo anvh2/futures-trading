@@ -1,9 +1,15 @@
 package exchange
 
 import (
+	"errors"
+
 	"github.com/adshao/go-binance/v2/futures"
-	"github.com/anvh2/futures-trading/internal/cache/errors"
 	"github.com/mitchellh/mapstructure"
+)
+
+var (
+	ErrorSymbolNotFound = errors.New("symbol: not found")
+	ErrorFilterNotFound = errors.New("filter: not found")
 )
 
 type FilterType string
@@ -47,7 +53,7 @@ func (s *Symbol) GetPriceFilter() (*Filter, error) {
 			return filter, nil
 		}
 	}
-	return nil, errors.ErrorFilterNotFound
+	return nil, ErrorFilterNotFound
 }
 
 func (s *Symbol) GetLotSizeFilter() (*Filter, error) {
@@ -56,5 +62,5 @@ func (s *Symbol) GetLotSizeFilter() (*Filter, error) {
 			return filter, nil
 		}
 	}
-	return nil, errors.ErrorFilterNotFound
+	return nil, ErrorFilterNotFound
 }

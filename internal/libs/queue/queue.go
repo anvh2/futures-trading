@@ -1,137 +1,230 @@
 package queue
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/anvh2/futures-trading/internal/libs/lease"
 )
 
+var (
+	ErrInvalidMessage            = errors.New("invalid message")
+	ErrNoMessageAvailable        = errors.New("no message available")
+	ErrExpireNegative            = errors.New("expire time must be positive")
+	ErrMustCommitBeforeConsuming = errors.New("must commit before consuming")
+)
+
+var _ IQueue = &Queue{}
+
+type IQueue interface {
+	Push(ctx context.Context, topicName string, data interface{}, opts ...OptionFunc) error
+	Consume(ctx context.Context, topicName, groupID string) (*Message, error)
+	Commit(ctx context.Context, topicName, groupID string, offset int64)
+	Close()
+}
+
 const (
-	defaultRetention time.Duration = time.Hour
+	defaultRetention = time.Hour
+	cleanupInterval  = 30 * time.Second
 )
 
 type Message struct {
+	Topic   string
+	GroupID string
+	Offset  int64
+	Data    interface{}
+
 	expire time.Time
-	Offset int64
-	Data   interface{}
+	commit func(ctx context.Context, topicName, groupID string, offset int64)
 }
 
-type Consumer struct {
-	ConsumerId    string
-	currentOffset int64
-}
-
-type Queue struct {
-	lock      *sync.Mutex
-	length    int64
-	table     map[int64]*Message
-	consumers map[string]*Consumer
-	quit      chan struct{}
-}
-
-func New() *Queue {
-	queue := &Queue{
-		lock:      &sync.Mutex{},
-		length:    0,
-		table:     make(map[int64]*Message),
-		consumers: make(map[string]*Consumer),
-		quit:      make(chan struct{}),
+func (m *Message) Commit(ctx context.Context) error {
+	if m == nil || m.commit == nil {
+		return ErrInvalidMessage
 	}
 
-	// ensure there are no memory leaks
-	ticker := time.NewTicker(30 * time.Second)
-	go func() {
-		defer recover()
-
-		for {
-			select {
-			case <-ticker.C:
-				for offset, msg := range queue.table {
-					if msg.expire.Before(time.Now()) {
-						queue.remove(offset)
-					}
-				}
-
-			case <-queue.quit:
-				return
-			}
-		}
-	}()
-
-	return queue
-}
-
-func (q *Queue) remove(offset int64) {
-	q.lock.Lock()
-	defer q.lock.Unlock()
-
-	delete(q.table, offset)
-}
-
-func (q *Queue) Register(consumerId string) *Consumer {
-	q.lock.Lock()
-	defer q.lock.Unlock()
-
-	consumer := &Consumer{
-		ConsumerId:    consumerId,
-		currentOffset: 0,
-	}
-	q.consumers[consumerId] = consumer
-
-	return consumer
-}
-
-func (q *Queue) Push(data interface{}, expire time.Duration) error {
-	if expire.Milliseconds() < 0 {
-		return errors.New("expire time negative")
-	}
-
-	if expire.Milliseconds() == 0 {
-		expire = defaultRetention
-	}
-
-	q.lock.Lock()
-	defer q.lock.Unlock()
-
-	q.length++
-
-	msg := &Message{
-		expire: time.Now().Add(expire),
-		Offset: q.length,
-		Data:   data,
-	}
-
-	q.table[q.length] = msg
-
+	m.commit(ctx, m.Topic, m.GroupID, m.Offset)
+	m.commit = nil
 	return nil
 }
 
-func (q *Queue) Peak(consumerId string) (*Message, error) {
+type ConsumerGroup struct {
+	leases map[string]*lease.Lease // topic -> lease
+
+	GroupID string
+	Offsets map[string]int64 // topic -> offset
+}
+
+type Topic struct {
+	name   string
+	length int64
+	table  map[int64]*Message
+	lock   sync.Mutex
+}
+
+type Queue struct {
+	topics    map[string]*Topic
+	groups    map[string]*ConsumerGroup
+	lock      sync.Mutex
+	quit      chan struct{}
+	retention time.Duration
+}
+
+func New(opts ...OptionFunc) *Queue {
+	option := configure(opts...)
+
+	q := &Queue{
+		topics:    make(map[string]*Topic),
+		groups:    make(map[string]*ConsumerGroup),
+		quit:      make(chan struct{}),
+		retention: option.retention,
+	}
+
+	go q.cleanup()
+	return q
+}
+
+func (q *Queue) getOrCreateTopic(name string) *Topic {
 	q.lock.Lock()
 	defer q.lock.Unlock()
 
-	consumer, ok := q.consumers[consumerId]
-	if !ok {
-		consumer = q.Register(consumerId)
+	if topic, ok := q.topics[name]; ok {
+		return topic
 	}
 
-	for consumer.currentOffset <= q.length {
-		msg, ok := q.table[consumer.currentOffset]
+	topic := &Topic{
+		name:  name,
+		table: make(map[int64]*Message),
+	}
+	q.topics[name] = topic
+	return topic
+}
+
+func (q *Queue) getOrCreateGroup(groupID string) *ConsumerGroup {
+	q.lock.Lock()
+	defer q.lock.Unlock()
+
+	if g, ok := q.groups[groupID]; ok {
+		return g
+	}
+
+	g := &ConsumerGroup{
+		leases:  make(map[string]*lease.Lease),
+		GroupID: groupID,
+		Offsets: make(map[string]int64),
+	}
+	q.groups[groupID] = g
+	return g
+}
+
+func (q *Queue) Push(ctx context.Context, topicName string, data interface{}, opts ...OptionFunc) error {
+	option := configure(opts...)
+	expire := option.expire
+	if expire == 0 {
+		expire = q.retention
+	}
+
+	topic := q.getOrCreateTopic(topicName)
+
+	topic.lock.Lock()
+	defer topic.lock.Unlock()
+
+	topic.length++
+	msg := &Message{
+		Offset: topic.length,
+		Data:   data,
+		expire: time.Now().Add(expire),
+	}
+
+	topic.table[msg.Offset] = msg
+	return nil
+}
+
+func (q *Queue) Consume(ctx context.Context, topicName, groupID string) (*Message, error) {
+	topic := q.getOrCreateTopic(topicName)
+	group := q.getOrCreateGroup(groupID)
+
+	ls, ok := group.leases[topicName]
+	if !ok {
+		ls = lease.New()
+		group.leases[topicName] = ls
+	}
+
+	acquired := ls.Try()
+	if !acquired {
+		return nil, ErrMustCommitBeforeConsuming
+	}
+
+	topic.lock.Lock()
+	defer topic.lock.Unlock()
+
+	offset := group.Offsets[topicName] + 1
+
+	for offset <= topic.length {
+		msg, ok := topic.table[offset]
 		if !ok {
-			consumer.currentOffset++
+			offset++
+			group.Offsets[topicName] = offset - 1
 			continue
 		}
 
 		if msg.expire.Before(time.Now()) {
-			delete(q.table, consumer.currentOffset)
-			consumer.currentOffset++
+			delete(topic.table, offset)
+			offset++
+			group.Offsets[topicName] = offset - 1
 			continue
 		}
+
+		msg.GroupID = groupID
+		msg.Topic = topicName
+		msg.commit = q.Commit
 
 		return msg, nil
 	}
 
-	return nil, errors.New("notfound")
+	ls.Release()
+	return nil, ErrNoMessageAvailable
+}
+
+func (q *Queue) Commit(ctx context.Context, topicName, groupID string, offset int64) {
+	group := q.getOrCreateGroup(groupID)
+	group.Offsets[topicName] = offset
+	if lease, ok := group.leases[topicName]; ok {
+		lease.Release()
+	}
+}
+
+func (q *Queue) cleanup() {
+	ticker := time.NewTicker(cleanupInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			q.cleanupExpired()
+		case <-q.quit:
+			return
+		}
+	}
+}
+
+func (q *Queue) cleanupExpired() {
+	q.lock.Lock()
+	defer q.lock.Unlock()
+
+	now := time.Now()
+
+	for _, topic := range q.topics {
+		topic.lock.Lock()
+		for offset, msg := range topic.table {
+			if msg.expire.Before(now) {
+				delete(topic.table, offset)
+			}
+		}
+		topic.lock.Unlock()
+	}
 }
 
 func (q *Queue) Close() {

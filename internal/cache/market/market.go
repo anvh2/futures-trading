@@ -1,10 +1,15 @@
 package market
 
 import (
+	"errors"
 	"sync"
 
-	"github.com/anvh2/futures-trading/internal/cache/errors"
 	"github.com/anvh2/futures-trading/internal/libs/cache/circular"
+)
+
+var (
+	ErrorChartNotFound   = errors.New("chart: not found")
+	ErrorCandlesNotFound = errors.New("candles: not found")
 )
 
 type Market struct {
@@ -26,7 +31,7 @@ func (c *Market) CandleSummary(symbol string) (*CandleSummary, error) {
 	defer c.mutex.Unlock()
 
 	if c.cache[symbol] == nil {
-		return nil, errors.ErrorChartNotFound
+		return nil, ErrorChartNotFound
 	}
 
 	return c.cache[symbol], nil

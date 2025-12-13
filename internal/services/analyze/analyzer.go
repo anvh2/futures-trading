@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/anvh2/futures-trading/internal/cache"
+	"github.com/anvh2/futures-trading/internal/config"
 	"github.com/anvh2/futures-trading/internal/externals/telegram"
 	"github.com/anvh2/futures-trading/internal/libs/cache/simple"
 	"github.com/anvh2/futures-trading/internal/libs/channel"
@@ -15,6 +16,7 @@ import (
 )
 
 type Analyzer struct {
+	config        config.Config
 	logger        *logger.Logger
 	cache         *simple.Cache
 	worker        *worker.Worker
@@ -28,6 +30,7 @@ type Analyzer struct {
 }
 
 func New(
+	config config.Config,
 	logger *logger.Logger,
 	notify *telegram.TelegramBot,
 	marketCache cache.Market,
@@ -42,6 +45,7 @@ func New(
 	}
 
 	analyzer := &Analyzer{
+		config:        config,
 		logger:        logger,
 		notify:        notify,
 		worker:        worker,

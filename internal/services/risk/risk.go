@@ -43,16 +43,36 @@ func RecommendLeverage(atrPercent float64, confidence int) int {
 	}
 }
 
-// PositionSizePercent scales within [0, MaxPositionPercent] based on confidence.
-// 60% -> ~2%, 100% -> MaxPositionPercent.
-func PositionSizePercent(confidence int, cfg Config) float64 {
+// PositionSizePercent scales within [0, MaxPositionPercent] based on confidence and ATR volatility.
+// 60% -> ~2%, 100% -> MaxPositionPercent, adjusted down for high volatility.
+func PositionSizePercent(confidence int, atrPercent float64, cfg Config) float64 {
 	if confidence < 60 {
 		return 0
 	}
-	// Linear scale from 2% at 60 to Max at 100
+
+	// Base position size from confidence
 	base := 2.0
 	span := cfg.MaxPositionPercent - base
 	pct := base + (float64(confidence-60)/40.0)*span
+
+	// ATR volatility adjustment - reduce position size for high volatility
+	var volatilityAdjustment float64
+	switch {
+	case atrPercent > 5.0: // Very high volatility
+		volatilityAdjustment = 0.5
+	case atrPercent > 3.0: // High volatility
+		volatilityAdjustment = 0.7
+	case atrPercent > 2.0: // Medium volatility
+		volatilityAdjustment = 0.85
+	case atrPercent > 1.0: // Normal volatility
+		volatilityAdjustment = 1.0
+	default: // Low volatility
+		volatilityAdjustment = 1.1
+	}
+
+	pct *= volatilityAdjustment
+
+	// Ensure bounds
 	if pct < 0 {
 		pct = 0
 	}

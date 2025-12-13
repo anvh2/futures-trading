@@ -10,18 +10,16 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/anvh2/futures-trading/internal/cache"
-	"github.com/anvh2/futures-trading/internal/cache/exchange"
-	"github.com/anvh2/futures-trading/internal/cache/market"
+	exchange_cache "github.com/anvh2/futures-trading/internal/cache/exchange"
+	market_cache "github.com/anvh2/futures-trading/internal/cache/market"
+	"github.com/anvh2/futures-trading/internal/config"
 	"github.com/anvh2/futures-trading/internal/externals/binance"
 	"github.com/anvh2/futures-trading/internal/externals/telegram"
 	"github.com/anvh2/futures-trading/internal/libs/channel"
 	"github.com/anvh2/futures-trading/internal/libs/logger"
 	"github.com/anvh2/futures-trading/internal/libs/queue"
-	"github.com/anvh2/futures-trading/internal/server/handler"
-	analyzer "github.com/anvh2/futures-trading/internal/services/analyze"
-	crawler "github.com/anvh2/futures-trading/internal/services/crawl"
-	orderer "github.com/anvh2/futures-trading/internal/services/order"
+	"github.com/anvh2/futures-trading/internal/servers/handler"
+	"github.com/anvh2/futures-trading/internal/servers/orchestrator"
 	"github.com/anvh2/futures-trading/internal/services/settings"
 	pb "github.com/anvh2/futures-trading/pkg/api/v1/signal"
 
@@ -40,21 +38,10 @@ type RegisterGRPCHandlerFunc func(s *grpc.Server)
 type RegisterHTTPHandlerFunc func(ctx context.Context, mux *runtime.ServeMux, endpoint string, opts []grpc.DialOption) (err error)
 
 type Server struct {
-	logger  *logger.Logger
-	binance *binance.Binance
-	notify  *telegram.TelegramBot
+	logger *logger.Logger
 
-	queue    *queue.Queue
-	channel  *channel.Channel
-	settings *settings.Settings
-
-	marketCache   cache.Market
-	exchangeCache cache.Exchange
-
-	crawler  *crawler.Crawler
-	analyzer *analyzer.Analyzer
-	orderer  *orderer.Orderer
-	handler  *handler.Handler
+	handler      *handler.Handler
+	orchestrator *orchestrator.ServiceOrchestrator
 
 	server *struct {
 		grpc *grpc.Server
@@ -69,7 +56,7 @@ type Server struct {
 	quitChannel chan struct{}
 }
 
-func New() *Server {
+func New(config config.Config) *Server {
 	logger, err := logger.New(viper.GetString("trading.log_path"))
 	if err != nil {
 		log.Fatal("failed to init logger", err)
@@ -81,8 +68,8 @@ func New() *Server {
 	}
 
 	binance := binance.New(logger, false)
-	market := market.NewMarket(viper.GetInt32("chart.candles.limit"))
-	exchange := exchange.New(logger)
+	marketCache := market_cache.NewMarket(viper.GetInt32("chart.candles.limit"))
+	exchange := exchange_cache.New(logger)
 	handler := handler.New()
 	quit := make(chan struct{})
 
@@ -90,22 +77,18 @@ func New() *Server {
 	channel := channel.New()
 	settings := settings.NewDefaultSettings()
 
+	// Create service orchestrator
+	orchestrator, err := orchestrator.NewServiceOrchestrator(
+		config, logger, binance, notify, marketCache, exchange, queue, channel, settings)
+	if err != nil {
+		log.Fatal("failed to create service orchestrator", err)
+	}
+
 	return &Server{
-		logger:  logger,
-		binance: binance,
-		notify:  notify,
+		logger: logger,
 
-		queue:    queue,
-		channel:  channel,
-		settings: settings,
-
-		marketCache:   market,
-		exchangeCache: exchange,
-
-		crawler:  crawler.New(logger, binance, notify, market, exchange, channel),
-		analyzer: analyzer.New(logger, notify, market, exchange, queue, channel, settings),
-		orderer:  orderer.New(logger, notify, market, exchange, queue, settings),
-		handler:  handler,
+		handler:      handler,
+		orchestrator: orchestrator,
 
 		server: &struct {
 			grpc *grpc.Server
@@ -125,21 +108,16 @@ func New() *Server {
 }
 
 func (s *Server) Start() error {
-	if err := s.crawler.Start(); err != nil {
-		log.Fatal("failed to crawling data", zap.Error(err))
-	}
-
-	if err := s.analyzer.Start(); err != nil {
-		log.Fatal("failed to start analyzer", zap.Error(err))
-	}
-
-	if err := s.orderer.Start(); err != nil {
-		log.Fatal("failed to start orderer", zap.Error(err))
-	}
-
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", viper.GetInt("server.port")))
 	if err != nil {
 		return err
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := s.orchestrator.Start(ctx); err != nil {
+		log.Fatal("failed to start service orchestrator", zap.Error(err))
 	}
 
 	// catch sig
@@ -147,7 +125,7 @@ func (s *Server) Start() error {
 	done := make(chan error, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	serverCtx, serverCancel := context.WithCancel(context.Background())
 
 	go func() {
 		sig := <-sigs
@@ -156,17 +134,17 @@ func (s *Server) Start() error {
 		s.server.grpc.Stop()
 		s.server.http.Close()
 
-		cancel()
+		serverCancel()
 		close(s.quitChannel)
 
-		s.crawler.Stop()
-		s.analyzer.Stop()
-		s.orderer.Stop()
+		if err := s.orchestrator.Stop(); err != nil {
+			fmt.Println("Error stopping orchestrator:", err)
+		}
 
 		close(done)
 	}()
 
-	go s.serve(ctx, lis)
+	go s.serve(serverCtx, lis)
 
 	fmt.Println("Server now listening at: " + lis.Addr().String())
 

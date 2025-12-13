@@ -1,8 +1,6 @@
 module github.com/anvh2/futures-trading
 
-go 1.22.0
-
-toolchain go1.23.1
+go 1.24.3
 
 require (
 	github.com/adshao/go-binance/v2 v2.4.1
