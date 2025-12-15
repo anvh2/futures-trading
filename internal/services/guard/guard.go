@@ -6,9 +6,18 @@ import (
 	"time"
 
 	"github.com/anvh2/futures-trading/internal/libs/logger"
+	"github.com/anvh2/futures-trading/internal/libs/queue"
 	"github.com/anvh2/futures-trading/internal/services/state"
 	"go.uber.org/zap"
 )
+
+// ExecutorController interface for controlling executor operations
+type ExecutorController interface {
+	Terminate() error
+	Pause() error
+	Resume() error
+	CloseAllPositions() error
+}
 
 // SafetyRule represents a safety rule that can trigger circuit breakers
 type SafetyRule interface {
@@ -82,6 +91,8 @@ type SafetyGuard struct {
 	quitChannel     chan struct{}
 	isRunning       bool
 	checkInterval   time.Duration
+	executorCtrl    ExecutorController
+	queue           *queue.Queue
 }
 
 // SafetyListener interface for safety event notifications
@@ -112,6 +123,20 @@ func New(logger *logger.Logger, stateManager *state.StateManager) *SafetyGuard {
 	guard.initializeDefaultRules()
 
 	return guard
+}
+
+// SetExecutorController sets the executor controller for emergency operations
+func (sg *SafetyGuard) SetExecutorController(ctrl ExecutorController) {
+	sg.mutex.Lock()
+	defer sg.mutex.Unlock()
+	sg.executorCtrl = ctrl
+}
+
+// SetQueue sets the message queue for emergency notifications
+func (sg *SafetyGuard) SetQueue(queue *queue.Queue) {
+	sg.mutex.Lock()
+	defer sg.mutex.Unlock()
+	sg.queue = queue
 }
 
 // AddRule adds a safety rule to the guard
@@ -325,15 +350,54 @@ func (sg *SafetyGuard) executeViolationAction(violation *SafetyViolation) {
 		sg.stateManager.SetSystemStatus(state.SystemStatusPaused)
 		sg.triggerCircuitBreaker("pause_trading", violation)
 
+		// Pause executor if controller is available
+		if sg.executorCtrl != nil {
+			if err := sg.executorCtrl.Pause(); err != nil {
+				sg.logger.Error("Failed to pause executor", zap.Error(err))
+			}
+		}
+
 	case ActionClosePositions:
 		sg.stateManager.SetSystemStatus(state.SystemStatusEmergency)
 		sg.triggerCircuitBreaker("emergency_close", violation)
-		// TODO: Trigger position closure through order service
+
+		// Close all positions through executor
+		if sg.executorCtrl != nil {
+			if err := sg.executorCtrl.CloseAllPositions(); err != nil {
+				sg.logger.Error("Failed to close all positions", zap.Error(err))
+			}
+		}
+
+		// Send emergency notification through queue
+		if sg.queue != nil {
+			emergencyMsg := map[string]interface{}{
+				"type":      "emergency_close",
+				"violation": violation,
+				"timestamp": time.Now(),
+			}
+			sg.queue.Push(nil, "emergency", emergencyMsg)
+		}
 
 	case ActionEmergencyStop:
 		sg.stateManager.SetSystemStatus(state.SystemStatusEmergency)
 		sg.triggerCircuitBreaker("emergency_stop", violation)
-		// TODO: Implement emergency stop protocol
+
+		// Terminate executor
+		if sg.executorCtrl != nil {
+			if err := sg.executorCtrl.Terminate(); err != nil {
+				sg.logger.Error("Failed to terminate executor", zap.Error(err))
+			}
+		}
+
+		// Send critical emergency notification
+		if sg.queue != nil {
+			emergencyMsg := map[string]interface{}{
+				"type":      "emergency_stop",
+				"violation": violation,
+				"timestamp": time.Now(),
+			}
+			sg.queue.Push(nil, "critical-emergency", emergencyMsg)
+		}
 	}
 }
 
@@ -454,5 +518,8 @@ func (sg *SafetyGuard) initializeDefaultRules() {
 		NewDrawdownLimitRule(),
 		NewAccountBalanceRule(),
 		NewPositionSizeRule(),
+		NewSystemStatusRule(),
+		NewMarketVolatilityRule(),
+		NewConnectionHealthRule(),
 	)
 }

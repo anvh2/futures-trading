@@ -21,6 +21,7 @@ import (
 	"github.com/anvh2/futures-trading/internal/servers/handler"
 	"github.com/anvh2/futures-trading/internal/servers/orchestrator"
 	"github.com/anvh2/futures-trading/internal/services/settings"
+	signal_service "github.com/anvh2/futures-trading/internal/services/signal"
 	pb "github.com/anvh2/futures-trading/pkg/api/v1/signal"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
@@ -68,7 +69,7 @@ func New(config config.Config) *Server {
 	}
 
 	binance := binance.New(logger, false)
-	marketCache := market_cache.NewMarket(viper.GetInt32("chart.candles.limit"))
+	market := market_cache.New(viper.GetInt32("chart.candles.limit"))
 	exchange := exchange_cache.New(logger)
 	handler := handler.New()
 	quit := make(chan struct{})
@@ -76,10 +77,9 @@ func New(config config.Config) *Server {
 	queue := queue.New()
 	channel := channel.New()
 	settings := settings.NewDefaultSettings()
+	signal := signal_service.NewService(100)
 
-	// Create service orchestrator
-	orchestrator, err := orchestrator.NewServiceOrchestrator(
-		config, logger, binance, notify, marketCache, exchange, queue, channel, settings)
+	orchestrator, err := orchestrator.NewServiceOrchestrator(config, logger, binance, notify, market, exchange, queue, channel, signal, settings)
 	if err != nil {
 		log.Fatal("failed to create service orchestrator", err)
 	}

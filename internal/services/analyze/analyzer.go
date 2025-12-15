@@ -12,6 +12,7 @@ import (
 	"github.com/anvh2/futures-trading/internal/libs/queue"
 	"github.com/anvh2/futures-trading/internal/libs/worker"
 	"github.com/anvh2/futures-trading/internal/services/settings"
+	"github.com/anvh2/futures-trading/internal/services/signal"
 	"go.uber.org/zap"
 )
 
@@ -24,6 +25,7 @@ type Analyzer struct {
 	exchangeCache cache.Exchange
 	queue         *queue.Queue
 	channel       *channel.Channel
+	signal        signal.Service
 	settings      *settings.Settings
 	notify        *telegram.TelegramBot
 	quitChannel   chan struct{}
@@ -37,6 +39,7 @@ func New(
 	exchangeCache cache.Exchange,
 	queue *queue.Queue,
 	channel *channel.Channel,
+	signal signal.Service,
 	settings *settings.Settings,
 ) *Analyzer {
 	worker, err := worker.New(logger, &worker.PoolConfig{NumProcess: 2})
@@ -47,6 +50,7 @@ func New(
 	analyzer := &Analyzer{
 		config:        config,
 		logger:        logger,
+		signal:        signal,
 		notify:        notify,
 		worker:        worker,
 		cache:         simple.NewCache(),

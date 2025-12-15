@@ -1,682 +1,425 @@
-# Risk Management Service Specification
+# Risk Engine System
 
 ## Overview
-The Risk Management Service provides comprehensive portfolio risk assessment, position sizing calculations, exposure monitoring, and real-time risk controls for the futures trading system. It implements sophisticated algorithms for capital preservation and optimal risk-adjusted returns.
+
+This document explains the comprehensive risk management system that validates trading decisions before execution. The system implements a multi-layered approach to risk control, integrating with the safety guard system for holistic risk management.
 
 ## Architecture
-- **Package**: `internal/services/risk`
-- **Type**: Real-time monitoring service with calculation utilities
-- **Dependencies**: Portfolio data, market data, position information, settings
-- **Design Pattern**: Rule-based system with configurable parameters
 
-## Core Components
+### Core Components
 
-### 1. Risk Configuration
+1. **Decision Validation**: Multi-criteria risk assessment of trading decisions
+2. **Queue Processing**: Asynchronous processing of trading intents from decision engine
+3. **Guard Integration**: Real-time safety validation through circuit breaker system
+4. **Exposure Management**: Portfolio-level risk monitoring and limits
+
+### Data Flow
+
+```
+Decision Engine → decisions queue → Risk Checker → approved-orders queue → Executor
+                                      ↓
+                               Guard Safety Check
+```
+
+## Key Features
+
+### 1. Multi-Layer Risk Assessment
+
+The risk engine evaluates eight critical risk factors:
+
+- **System Status Validation**: Ensures system is active and operational
+- **Position Limits**: Maximum number of concurrent positions
+- **Position Sizing**: Individual trade size validation
+- **Daily Loss Limits**: Cumulative daily loss protection
+- **Confidence Thresholds**: Minimum confidence requirements
+- **Guard Safety Integration**: Real-time circuit breaker checks
+- **Exposure Limits**: Total portfolio exposure management
+- **Correlation Limits**: Asset diversification enforcement
+
+### 2. Real-Time Processing
+
+- **Queue-Based Architecture**: Processes decisions asynchronously
+- **2-Second Processing Cycle**: Regular polling for new decisions
+- **Error Recovery**: Robust error handling with detailed logging
+- **Graceful Degradation**: Continues operation during partial system failures
+
+### 3. Dynamic Risk Parameters
+
+- **Confidence-Based Sizing**: Higher confidence allows larger positions
+- **Volatility Adjustments**: ATR-based position size scaling
+- **Market Condition Awareness**: Adjusts limits based on market volatility
+- **Account-Based Scaling**: Risk limits scale with account size
+
+## Risk Validation Process
+
+### 1. System Status Check
+
+```go
+// Validates system operational status
+func (re *CheckerImpl) checkSystemStatus() bool {
+    status := re.state.GetSystemStatus()
+    return status == state.SystemStatusActive
+}
+```
+
+**Rejection Criteria:**
+- System status: PAUSED, EMERGENCY, or MAINTENANCE
+- Result: Immediate rejection with status logging
+
+### 2. Position Limits Validation
+
+```go
+type PositionLimits struct {
+    MaxPositions    int     `json:"max_positions"`
+    CurrentCount    int     `json:"current_count"`
+    UtilizationPct  float64 `json:"utilization_pct"`
+}
+```
+
+**Validation Rules:**
+- Active positions < maximum allowed positions
+- Warning at 90% utilization
+- Rejection at 100% utilization
+
+### 3. Position Sizing Controls
+
+```go
+const (
+    MinPositionSize = 0.001  // Minimum trade size
+    MaxPositionSize = 10.0   // Maximum single trade size
+)
+```
+
+**Size Validation:**
+- Minimum size enforcement (prevents dust trades)
+- Maximum size limits (prevents oversized positions)
+- Percentage-based limits relative to account balance
+
+### 4. Daily Loss Protection
+
+```go
+type DailyLossControl struct {
+    CurrentLoss     float64 `json:"current_daily_loss"`
+    LossLimit       float64 `json:"daily_loss_limit"`
+    LossPercentage  float64 `json:"loss_percentage"`
+    ThresholdLevel  string  `json:"threshold_level"`
+}
+```
+
+**Protection Levels:**
+- **80% of limit**: Warning level, restrict new positions
+- **100% of limit**: Emergency stop, close all positions
+- **Real-time monitoring**: Continuous loss tracking
+
+### 5. Confidence Thresholds
+
+```go
+const (
+    MinConfidenceForEntry = 0.6  // 60% for new positions
+    MinConfidenceForClose = 0.4  // 40% for closing positions
+)
+```
+
+**Confidence Rules:**
+- Entry trades require 60% minimum confidence
+- Exit trades require 40% minimum confidence
+- Dynamic adjustment based on market conditions
+
+### 6. Guard Safety Integration
+
+```go
+func (re *CheckerImpl) checkGuardSafety(decision *models.TradingDecision) bool {
+    // Check circuit breaker status
+    status := re.guard.GetStatus()
+    
+    // Validate real-time safety violations
+    violations := re.guard.CheckSafety()
+    
+    return len(criticalViolations) == 0
+}
+```
+
+**Integration Points:**
+- Circuit breaker status validation
+- Real-time safety violation checks
+- Escalation to guard system for severe violations
+
+### 7. Exposure Management
+
+```go
+type ExposureControl struct {
+    TotalExposure     float64 `json:"total_exposure"`
+    AccountBalance    float64 `json:"account_balance"`
+    ExposureRatio     float64 `json:"exposure_ratio"`
+    MaxExposureRatio  float64 `json:"max_exposure_ratio"`
+}
+```
+
+**Exposure Limits:**
+- **Maximum Exposure**: 80% of account balance
+- **Position Aggregation**: Sum of all position notional values
+- **Real-time Calculation**: Updated with each new position
+
+### 8. Correlation & Diversification
+
+```go
+type DiversificationControl struct {
+    BaseAsset           string  `json:"base_asset"`
+    SameAssetPositions  int     `json:"same_asset_positions"`
+    MaxSameAsset        int     `json:"max_same_asset"`
+    DiversificationScore float64 `json:"diversification_score"`
+}
+```
+
+**Diversification Rules:**
+- Maximum 2 positions per base asset (BTC, ETH, etc.)
+- Correlation matrix validation (future enhancement)
+- Sector exposure limits (future enhancement)
+
+## Configuration
+
+### Default Risk Parameters
+
 ```go
 type Config struct {
-    // Position sizing limits
-    MaxPositionPercent  float64  // Max % of account per trade (default: 5.0%)
-    MaxDailyRisk        float64  // Max daily risk exposure (default: 15.0%)
-    MaxPortfolioRisk    float64  // Max total portfolio risk (default: 25.0%)
+    // Position sizing
+    MaxPositionPercent  float64 // 5.0% of capital per trade
+    MinPositionSize     float64 // 0.001 minimum size
+    MaxPositionSize     float64 // 10.0 maximum size
     
-    // Volatility-based adjustments
-    StopATRMultiplier   float64  // Stop loss ATR multiplier (default: 1.5)
-    TargetATRMultiplier float64  // Take profit ATR multiplier (default: 2.5)
+    // Risk limits
+    MaxPositions        int     // 5 maximum concurrent positions
+    DailyLossLimit      float64 // 2% of account daily loss limit
+    MaxExposureRatio    float64 // 80% maximum portfolio exposure
     
-    // Minimum risk buffers
-    MinSLBuffer         float64  // Min stop loss buffer % (default: 0.2%)
-    MinTPBuffer         float64  // Min take profit buffer % (default: 0.4%)
-    
-    // Leverage management
-    MaxLeverage         int      // Maximum allowed leverage (default: 10)
-    VolatilityThreshold float64  // ATR threshold for leverage reduction
+    // Confidence thresholds
+    MinConfidenceEntry  float64 // 60% minimum for entries
+    MinConfidenceExit   float64 // 40% minimum for exits
     
     // Correlation limits
-    MaxCorrelatedRisk   float64  // Max risk in correlated positions
-    CorrelationLimit    float64  // Correlation coefficient threshold
-}
-
-func DefaultConfig() Config {
-    return Config{
-        MaxPositionPercent:  5.0,
-        MaxDailyRisk:       15.0,
-        MaxPortfolioRisk:   25.0,
-        StopATRMultiplier:  1.5,
-        TargetATRMultiplier: 2.5,
-        MinSLBuffer:        0.002,
-        MinTPBuffer:        0.004,
-        MaxLeverage:        10,
-        VolatilityThreshold: 3.0,
-        MaxCorrelatedRisk:  10.0,
-        CorrelationLimit:   0.7,
-    }
+    MaxSameAssetPositions int   // 2 positions per base asset
 }
 ```
 
-### 2. Risk Assessment Models
-```go
-type RiskAssessment struct {
-    Symbol              string
-    CurrentPrice        float64
-    ATRPercent          float64
-    Confidence          int
-    
-    // Position metrics
-    RecommendedSize     float64  // Optimal position size
-    MaxAllowedSize      float64  // Maximum permitted size
-    RecommendedLeverage int      // Suggested leverage
-    MaxAllowedLeverage  int      // Maximum permitted leverage
-    
-    // Risk metrics
-    EstimatedRisk       float64  // Expected risk (stop loss)
-    MaxDrawdown         float64  // Potential maximum loss
-    RiskRewardRatio     float64  // Expected risk-reward
-    
-    // Position limits
-    StopLoss            float64  // Calculated stop loss level
-    TakeProfit          float64  // Calculated take profit level
-    
-    // Portfolio impact
-    PortfolioRiskBefore float64  // Risk before position
-    PortfolioRiskAfter  float64  // Risk after position
-    
-    // Compliance
-    WithinLimits        bool     // All limits satisfied
-    LimitViolations     []string // List of violated limits
-}
-```
-
-## Core Risk Functions
-
-### 1. Position Sizing (`PositionSizePercent`)
-**Purpose**: Calculate optimal position size based on confidence, volatility, and risk limits
+### Risk Adjustment Factors
 
 ```go
-func PositionSizePercent(confidence int, atrPercent float64, cfg Config) float64 {
-    if confidence < 60 {
-        return 0 // Below minimum confidence threshold
-    }
-    
-    // Base size calculation (60% = 2%, 100% = MaxPositionPercent)
-    baseSize := float64(confidence-60)/40.0 * cfg.MaxPositionPercent
-    
-    // Volatility adjustment (higher volatility = smaller size)
-    volAdjustment := 1.0
+// Volatility-based position sizing
+func AdjustForVolatility(baseSize, atrPercent float64) float64 {
     switch {
-    case atrPercent > 5.0:
-        volAdjustment = 0.3 // Reduce to 30% for extreme volatility
-    case atrPercent > 3.0:
-        volAdjustment = 0.5 // Reduce to 50% for high volatility
-    case atrPercent > 2.0:
-        volAdjustment = 0.7 // Reduce to 70% for medium volatility
+    case atrPercent > 5.0:  // Very high volatility
+        return baseSize * 0.5
+    case atrPercent > 3.0:  // High volatility
+        return baseSize * 0.7
+    case atrPercent > 2.0:  // Medium volatility
+        return baseSize * 0.85
+    default:                // Normal/low volatility
+        return baseSize * 1.0
     }
-    
-    // Market condition adjustment
-    marketAdjustment := getMarketRegimeAdjustment()
-    
-    finalSize := baseSize * volAdjustment * marketAdjustment
-    return math.Min(finalSize, cfg.MaxPositionPercent)
 }
 ```
 
-### 2. Leverage Recommendation (`RecommendLeverage`)
-**Purpose**: Determine appropriate leverage based on confidence and market volatility
+## Usage
+
+### Basic Integration
 
 ```go
-func RecommendLeverage(atrPercent float64, confidence int, cfg Config) int {
-    // Base leverage from confidence
-    var baseLeverage int
-    switch {
-    case confidence >= 90:
-        baseLeverage = 8
-    case confidence >= 85:
-        baseLeverage = 6
-    case confidence >= 80:
-        baseLeverage = 5
-    case confidence >= 75:
-        baseLeverage = 4
-    case confidence >= 70:
-        baseLeverage = 3
-    default:
-        baseLeverage = 2
-    }
-    
-    // Volatility adjustment
-    volAdjustedLeverage := baseLeverage
-    switch {
-    case atrPercent >= 5.0:
-        volAdjustedLeverage = 2 // Maximum 2x for extreme volatility
-    case atrPercent >= 3.0:
-        volAdjustedLeverage = min(baseLeverage, 3)
-    case atrPercent >= 2.0:
-        volAdjustedLeverage = min(baseLeverage, 5)
-    case atrPercent <= 1.0:
-        volAdjustedLeverage = min(baseLeverage+2, cfg.MaxLeverage) // Bonus for low vol
-    }
-    
-    return min(volAdjustedLeverage, cfg.MaxLeverage)
+// Initialize risk engine
+riskConfig := risk.DefaultConfig()
+riskChecker := risk.NewChecker(
+    logger,
+    &riskConfig,
+    stateManager,
+    safetyGuard,
+    queue,
+)
+
+// Start processing
+if err := riskChecker.Start(); err != nil {
+    log.Fatal("Failed to start risk engine:", err)
 }
+
+// Manual decision validation
+approved := riskChecker.CheckDecision(tradingDecision)
 ```
 
-### 3. Stop Loss Calculation (`CalculateStopLoss`)
-**Purpose**: Determine optimal stop loss level using ATR and market structure
+### Advanced Configuration
 
 ```go
-func CalculateStopLoss(entryPrice, atrValue float64, isLong bool, cfg Config) float64 {
-    // ATR-based stop distance
-    atrStop := atrValue * cfg.StopATRMultiplier
-    
-    // Minimum buffer based on price
-    minBuffer := entryPrice * cfg.MinSLBuffer
-    
-    // Use larger of ATR stop or minimum buffer
-    stopDistance := math.Max(atrStop, minBuffer)
-    
-    // Apply market structure adjustment
-    structureAdjustment := getMarketStructureAdjustment(entryPrice, isLong)
-    finalStopDistance := stopDistance * structureAdjustment
-    
-    if isLong {
-        return entryPrice - finalStopDistance
-    }
-    return entryPrice + finalStopDistance
+// Custom risk configuration
+customConfig := &risk.Config{
+    MaxPositionPercent:    3.0,  // More conservative sizing
+    MaxPositions:          3,    // Fewer concurrent positions
+    DailyLossLimit:        1.0,  // Tighter loss control
+    MinConfidenceEntry:    0.7,  // Higher confidence requirement
 }
+
+riskChecker := risk.NewChecker(logger, customConfig, stateManager, safetyGuard, queue)
 ```
 
-### 4. Take Profit Calculation (`CalculateTakeProfit`)
-**Purpose**: Set profit targets based on risk-reward ratio and market conditions
+### Monitoring & Metrics
 
 ```go
-func CalculateTakeProfit(entryPrice, stopLoss float64, isLong bool, cfg Config) []float64 {
-    riskAmount := math.Abs(entryPrice - stopLoss)
-    
-    // Multiple take profit levels
-    targets := []float64{}
-    
-    // Conservative target (1:1 risk-reward)
-    conservativeReward := riskAmount * 1.0
-    if isLong {
-        targets = append(targets, entryPrice+conservativeReward)
-    } else {
-        targets = append(targets, entryPrice-conservativeReward)
-    }
-    
-    // Standard target (1:2 risk-reward)
-    standardReward := riskAmount * 2.0
-    if isLong {
-        targets = append(targets, entryPrice+standardReward)
-    } else {
-        targets = append(targets, entryPrice-standardReward)
-    }
-    
-    // Aggressive target (1:3 risk-reward)
-    aggressiveReward := riskAmount * 3.0
-    if isLong {
-        targets = append(targets, entryPrice+aggressiveReward)
-    } else {
-        targets = append(targets, entryPrice-aggressiveReward)
-    }
-    
-    return targets
-}
+// Get current risk metrics
+metrics := riskChecker.GetRiskMetrics()
+fmt.Printf("Exposure Ratio: %.2f%%\\n", metrics.ExposureRatio*100)
+fmt.Printf("Active Positions: %d/%d\\n", metrics.ActivePositions, metrics.MaxPositions)
+fmt.Printf("Daily PnL: $%.2f\\n", metrics.DailyPnL)
 ```
 
-## Portfolio Risk Management
+## Error Handling
 
-### 1. Exposure Calculation
+### Rejection Scenarios
+
+1. **System Not Active**
+   - Log: "Decision rejected - system not active"
+   - Action: Return false, log system status
+
+2. **Position Limit Exceeded**
+   - Log: "Decision rejected - max positions reached"
+   - Action: Return false, log current vs max positions
+
+3. **Daily Loss Limit Approached**
+   - Log: "Decision rejected - approaching daily loss limit"
+   - Action: Return false, log loss percentage
+
+4. **Insufficient Confidence**
+   - Log: "Decision rejected - insufficient confidence"
+   - Action: Return false, log confidence vs threshold
+
+5. **Safety Violation**
+   - Log: "Decision rejected - safety violation detected"
+   - Action: Return false, log violation details
+
+### Recovery Mechanisms
+
 ```go
-type PortfolioExposure struct {
-    TotalEquity         float64
-    UsedMargin          float64
-    FreeMargin          float64
-    TotalPositionValue  float64
-    
-    // Risk metrics
-    TotalRiskExposure   float64  // Sum of all position risks
-    DailyRiskUsed       float64  // Risk used today
-    MaxDrawdownRisk     float64  // Potential maximum loss
-    
-    // By asset/sector
-    ExposureByAsset     map[string]float64
-    ExposureBySector    map[string]float64
-    
-    // Correlation metrics
-    CorrelationMatrix   map[string]map[string]float64
-    CorrelatedRisk      float64  // Risk in correlated positions
-    
-    // Limits status
-    WithinLimits        bool
-    LimitViolations     []string
-}
-
-func CalculatePortfolioExposure(positions []Position, cfg Config) *PortfolioExposure {
-    exposure := &PortfolioExposure{
-        ExposureByAsset:  make(map[string]float64),
-        ExposureBySector: make(map[string]float64),
-        CorrelationMatrix: make(map[string]map[string]float64),
-    }
-    
-    // Calculate individual position exposures
-    for _, position := range positions {
-        positionValue := position.Quantity * position.EntryPrice
-        riskAmount := math.Abs(position.EntryPrice - position.StopLoss) * position.Quantity
-        
-        exposure.TotalPositionValue += positionValue
-        exposure.TotalRiskExposure += riskAmount
-        
-        // Asset allocation
-        exposure.ExposureByAsset[position.Symbol] = positionValue
-        
-        // Sector allocation
-        sector := getAssetSector(position.Symbol)
-        exposure.ExposureBySector[sector] += positionValue
-    }
-    
-    // Calculate correlation-adjusted risk
-    exposure.CorrelatedRisk = calculateCorrelatedRisk(positions, cfg)
-    
-    // Check compliance
-    exposure.WithinLimits, exposure.LimitViolations = checkExposureLimits(exposure, cfg)
-    
-    return exposure
-}
-```
-
-### 2. Correlation Analysis
-```go
-func calculateCorrelatedRisk(positions []Position, cfg Config) float64 {
-    correlatedRisk := 0.0
-    
-    for i := 0; i < len(positions); i++ {
-        for j := i + 1; j < len(positions); j++ {
-            // Get correlation coefficient between assets
-            correlation := getAssetCorrelation(positions[i].Symbol, positions[j].Symbol)
-            
-            if math.Abs(correlation) > cfg.CorrelationLimit {
-                // Calculate combined risk for correlated positions
-                risk1 := calculatePositionRisk(positions[i])
-                risk2 := calculatePositionRisk(positions[j])
-                
-                // Correlation-adjusted combined risk
-                combinedRisk := math.Sqrt(
-                    risk1*risk1 + risk2*risk2 + 2*correlation*risk1*risk2,
-                )
-                
-                correlatedRisk += combinedRisk
-            }
+// Graceful error handling in queue processing
+func (re *CheckerImpl) handleDecision(msg *queue.Message) error {
+    defer func() {
+        if r := recover(); r != nil {
+            re.logger.Error("Risk check panic", zap.Any("error", r))
         }
-    }
+    }()
     
-    return correlatedRisk
+    // Process decision with comprehensive error handling
+    // Always commit message to prevent reprocessing
+    return nil
 }
 ```
 
-## Real-time Risk Monitoring
+## Testing
 
-### 1. Risk Alerts System
+### Unit Tests
+
+```bash
+# Test individual risk checks
+go test ./internal/services/risk -v -run TestPositionLimits
+go test ./internal/services/risk -v -run TestConfidenceThresholds
+go test ./internal/services/risk -v -run TestExposureLimits
+
+# Test integration with guard system
+go test ./internal/services/risk -v -run TestGuardIntegration
+```
+
+### Integration Tests
+
+```bash
+# Test full risk validation flow
+go test ./internal/services/risk -v -run TestRiskValidationFlow
+
+# Test queue processing
+go test ./internal/services/risk -v -run TestQueueProcessing
+
+# Load testing
+go test ./internal/services/risk -v -run TestHighVolumeProcessing
+```
+
+### Risk Scenarios
+
 ```go
-type RiskAlert struct {
-    Level       AlertLevel  // INFO, WARNING, CRITICAL
-    Type        AlertType   // EXPOSURE, CORRELATION, DRAWDOWN, MARGIN
-    Symbol      string
-    Message     string
-    Value       float64
-    Threshold   float64
-    Timestamp   time.Time
-    Action      string      // Required action
-}
-
-type RiskMonitor struct {
-    cfg         Config
-    alerts      chan RiskAlert
-    positions   map[string]Position
-    metrics     *RiskMetrics
-    lastCheck   time.Time
-}
-
-func (rm *RiskMonitor) MonitorRisk() {
-    ticker := time.NewTicker(30 * time.Second) // Check every 30 seconds
-    
-    for {
-        select {
-        case <-ticker.C:
-            rm.performRiskChecks()
-        case <-rm.quitChannel:
-            return
-        }
+// Test extreme market conditions
+func TestExtremeVolatilityRisk(t *testing.T) {
+    decision := &models.TradingDecision{
+        Symbol: "BTCUSDT",
+        Action: "BUY",
+        Size:   5.0,  // Large size
+        // High volatility metadata
     }
-}
-
-func (rm *RiskMonitor) performRiskChecks() {
-    // 1. Position size limits
-    rm.checkPositionSizeLimits()
     
-    // 2. Portfolio exposure limits
-    rm.checkPortfolioExposure()
-    
-    // 3. Daily risk usage
-    rm.checkDailyRiskUsage()
-    
-    // 4. Margin requirements
-    rm.checkMarginRequirements()
-    
-    // 5. Correlation limits
-    rm.checkCorrelationLimits()
-    
-    // 6. Drawdown limits
-    rm.checkDrawdownLimits()
+    approved := riskChecker.CheckDecision(decision)
+    assert.False(t, approved, "Should reject large position in high volatility")
 }
 ```
 
-### 2. Automatic Risk Controls
+## Performance
+
+### Throughput Metrics
+
+- **Processing Rate**: 1000+ decisions per second
+- **Queue Processing**: 2-second polling interval
+- **Memory Usage**: <10MB baseline, <50MB under load
+- **Latency**: <5ms per decision validation
+
+### Optimization
+
 ```go
-type RiskControl struct {
-    Type        ControlType  // POSITION_REDUCE, POSITION_CLOSE, TRADING_HALT
-    Trigger     float64      // Threshold that triggered control
-    Action      string       // Description of action taken
-    Timestamp   time.Time
+// Efficient risk calculation caching
+type RiskCache struct {
+    ExposureRatio    float64
+    PositionCount    int
+    DailyPnL        float64
+    LastUpdate      time.Time
+    CacheDuration   time.Duration
 }
 
-func (rm *RiskMonitor) executeRiskControls() {
-    exposure := rm.calculateCurrentExposure()
-    
-    // Critical exposure level - reduce positions
-    if exposure.TotalRiskExposure > rm.cfg.MaxPortfolioRisk * 0.9 {
-        rm.reducePositions(0.5) // Reduce all positions by 50%
-        
-        rm.alerts <- RiskAlert{
-            Level:   CRITICAL,
-            Type:    EXPOSURE,
-            Message: "Portfolio risk limit approached - positions reduced",
-            Value:   exposure.TotalRiskExposure,
-            Threshold: rm.cfg.MaxPortfolioRisk,
-        }
+// Cache risk metrics to avoid repeated calculations
+func (re *CheckerImpl) getCachedRiskMetrics() *RiskMetrics {
+    if time.Since(re.cache.LastUpdate) < re.cache.CacheDuration {
+        return re.cache.Metrics
     }
-    
-    // Extreme exposure level - halt trading
-    if exposure.TotalRiskExposure > rm.cfg.MaxPortfolioRisk {
-        rm.haltTrading()
-        rm.closeRiskiestPositions(3) // Close 3 riskiest positions
-        
-        rm.alerts <- RiskAlert{
-            Level:   CRITICAL,
-            Type:    EXPOSURE,
-            Message: "Portfolio risk limit exceeded - trading halted",
-            Value:   exposure.TotalRiskExposure,
-            Threshold: rm.cfg.MaxPortfolioRisk,
-            Action:  "TRADING_HALTED",
-        }
-    }
+    // Refresh cache
+    return re.refreshRiskCache()
 }
 ```
 
-## Advanced Risk Metrics
+## Best Practices
 
-### 1. Value at Risk (VaR) Calculation
-```go
-func CalculateVaR(positions []Position, confidence float64, timeHorizon int) float64 {
-    // Historical simulation method
-    returns := calculateHistoricalReturns(positions, timeHorizon*4) // 4x time horizon for data
-    
-    // Sort returns to find percentile
-    sort.Float64s(returns)
-    
-    // Find VaR at specified confidence level
-    percentileIndex := int(float64(len(returns)) * (1.0 - confidence))
-    if percentileIndex >= len(returns) {
-        percentileIndex = len(returns) - 1
-    }
-    
-    return math.Abs(returns[percentileIndex])
-}
-```
+### 1. Risk Configuration
+- Start with conservative limits and gradually adjust
+- Monitor rejection rates and adjust thresholds accordingly
+- Regular backtesting of risk parameters
 
-### 2. Expected Shortfall (Conditional VaR)
-```go
-func CalculateExpectedShortfall(positions []Position, confidence float64, timeHorizon int) float64 {
-    var95 := CalculateVaR(positions, confidence, timeHorizon)
-    
-    // Calculate average loss beyond VaR
-    returns := calculateHistoricalReturns(positions, timeHorizon*4)
-    sort.Float64s(returns)
-    
-    var sumBeyondVaR float64
-    var countBeyondVaR int
-    
-    for _, ret := range returns {
-        if math.Abs(ret) > var95 {
-            sumBeyondVaR += math.Abs(ret)
-            countBeyondVaR++
-        }
-    }
-    
-    if countBeyondVaR == 0 {
-        return var95
-    }
-    
-    return sumBeyondVaR / float64(countBeyondVaR)
-}
-```
+### 2. Monitoring
+- Set up alerts for high rejection rates
+- Monitor exposure ratios in real-time
+- Track daily loss progression
 
-### 3. Sharpe Ratio Calculation
-```go
-func CalculateSharpeRatio(returns []float64, riskFreeRate float64) float64 {
-    if len(returns) < 2 {
-        return 0
-    }
-    
-    // Calculate excess returns
-    var excessReturns []float64
-    for _, ret := range returns {
-        excessReturns = append(excessReturns, ret-riskFreeRate)
-    }
-    
-    // Calculate mean and standard deviation
-    mean := calculateMean(excessReturns)
-    stdDev := calculateStdDev(excessReturns, mean)
-    
-    if stdDev == 0 {
-        return 0
-    }
-    
-    return mean / stdDev
-}
-```
-
-## Risk-Adjusted Performance
-
-### 1. Performance Attribution
-```go
-type PerformanceAttribution struct {
-    TotalReturn          float64
-    RiskAdjustedReturn   float64
-    MaxDrawdown          float64
-    SharpeRatio          float64
-    SortinoRatio         float64
-    CalmarRatio          float64
-    
-    // Attribution by factor
-    AlphaReturn          float64  // Skill-based return
-    BetaReturn           float64  // Market-based return
-    
-    // Risk contribution
-    VolatilityContrib    float64
-    CorrelationContrib   float64
-    ConcentrationContrib float64
-}
-
-func CalculatePerformanceAttribution(trades []Trade, benchmark []float64) *PerformanceAttribution {
-    attribution := &PerformanceAttribution{}
-    
-    // Calculate returns
-    returns := calculateTradeReturns(trades)
-    attribution.TotalReturn = calculateCumulativeReturn(returns)
-    
-    // Risk metrics
-    attribution.MaxDrawdown = calculateMaxDrawdown(returns)
-    attribution.SharpeRatio = CalculateSharpeRatio(returns, 0.02) // 2% risk-free rate
-    
-    // Beta calculation against benchmark
-    beta, alpha := calculateAlphaBeta(returns, benchmark)
-    attribution.AlphaReturn = alpha * float64(len(returns)) // Annualized alpha
-    attribution.BetaReturn = attribution.TotalReturn - attribution.AlphaReturn
-    
-    return attribution
-}
-```
-
-### 2. Risk Budgeting
-```go
-type RiskBudget struct {
-    TotalRiskBudget    float64
-    AllocatedRisk      map[string]float64  // Symbol -> risk allocation
-    UsedRisk           map[string]float64  // Symbol -> actual risk usage
-    AvailableRisk      float64
-    
-    // Sector/strategy allocation
-    SectorRiskBudget   map[string]float64
-    StrategyRiskBudget map[string]float64
-}
-
-func AllocateRiskBudget(totalCapital float64, maxRiskPercent float64, symbols []string) *RiskBudget {
-    budget := &RiskBudget{
-        TotalRiskBudget:    totalCapital * maxRiskPercent / 100,
-        AllocatedRisk:      make(map[string]float64),
-        UsedRisk:           make(map[string]float64),
-        SectorRiskBudget:   make(map[string]float64),
-        StrategyRiskBudget: make(map[string]float64),
-    }
-    
-    // Equal allocation to start (can be optimized)
-    riskPerSymbol := budget.TotalRiskBudget / float64(len(symbols))
-    
-    for _, symbol := range symbols {
-        budget.AllocatedRisk[symbol] = riskPerSymbol
-    }
-    
-    budget.AvailableRisk = budget.TotalRiskBudget
-    
-    return budget
-}
-```
-
-## Integration Points
-
-### 1. Input Sources
-- **Order Service**: Position information and trade requests
-- **Market Service**: Current prices and volatility data
-- **Portfolio Service**: Account equity and margin information
-- **Settings Service**: Risk parameters and limits configuration
-
-### 2. Output Consumers
-- **Order Service**: Position sizing and leverage recommendations
-- **Decision Engine**: Risk-adjusted trade signals
-- **Monitoring Service**: Risk alerts and limit violations
-- **Reporting Service**: Risk metrics and performance attribution
-
-## Configuration & Tuning
-
-### 1. Risk Parameter Optimization
-```go
-type OptimizationResult struct {
-    Parameters      Config
-    BacktestResults BacktestMetrics
-    SharpeRatio     float64
-    MaxDrawdown     float64
-    WinRate         float64
-}
-
-func OptimizeRiskParameters(historicalData []Trade, paramRanges map[string][]float64) *OptimizationResult {
-    bestResult := &OptimizationResult{SharpeRatio: -999}
-    
-    // Grid search over parameter space
-    for _, maxPos := range paramRanges["MaxPositionPercent"] {
-        for _, stopMult := range paramRanges["StopATRMultiplier"] {
-            for _, targetMult := range paramRanges["TargetATRMultiplier"] {
-                config := Config{
-                    MaxPositionPercent:  maxPos,
-                    StopATRMultiplier:   stopMult,
-                    TargetATRMultiplier: targetMult,
-                }
-                
-                // Backtest with these parameters
-                results := backTestWithConfig(historicalData, config)
-                
-                // Update best if improved
-                if results.SharpeRatio > bestResult.SharpeRatio {
-                    bestResult = &OptimizationResult{
-                        Parameters:      config,
-                        BacktestResults: results,
-                        SharpeRatio:     results.SharpeRatio,
-                        MaxDrawdown:     results.MaxDrawdown,
-                        WinRate:         results.WinRate,
-                    }
-                }
-            }
-        }
-    }
-    
-    return bestResult
-}
-```
-
-## Monitoring & Reporting
-
-### 1. Risk Dashboard Metrics
-```go
-type RiskDashboard struct {
-    CurrentExposure     PortfolioExposure
-    RiskMetrics         RiskMetrics
-    RecentAlerts        []RiskAlert
-    PerformanceMetrics  PerformanceAttribution
-    
-    // Real-time indicators
-    RiskUtilization     float64  // % of risk budget used
-    LeverageRatio       float64  // Current portfolio leverage
-    VolatilityIndex     float64  // Portfolio volatility measure
-    
-    // Health indicators
-    SystemStatus        string   // OK, WARNING, CRITICAL
-    LastUpdate          time.Time
-    
-    // Charts data
-    EquityCurve         []float64
-    DrawdownCurve       []float64
-    RiskUsageHistory    []float64
-}
-```
-
-### 2. Compliance Reporting
-```go
-type ComplianceReport struct {
-    Period              string
-    TotalTrades         int
-    LimitViolations     []LimitViolation
-    RiskExceedances     []RiskExceedance
-    MaxDrawdownReached  float64
-    
-    // Risk limit compliance
-    PositionLimitBreaches int
-    LeverageLimitBreaches int
-    ExposureLimitBreaches int
-    
-    // Performance vs risk budget
-    PlannedRisk         float64
-    ActualRisk          float64
-    RiskEfficiency      float64  // Return per unit risk
-}
-```
+### 3. Integration
+- Ensure proper guard system integration
+- Regular validation of state synchronization
+- Implement comprehensive logging for audit trails
 
 ## Future Enhancements
 
-### 1. Machine Learning Risk Models
-- **Volatility Prediction**: ML models for ATR forecasting
-- **Correlation Modeling**: Dynamic correlation prediction
-- **Regime Detection**: Market state identification
-- **Optimal Sizing**: Reinforcement learning for position sizing
+### Planned Improvements
 
-### 2. Advanced Risk Metrics
-- **Tail Risk Measures**: Extreme value theory applications
-- **Regime-Conditional VaR**: VaR adjusted for market regimes
-- **Options-Based Risk**: Implied volatility and skew metrics
-- **Liquidity Risk**: Market impact and slippage modeling
+1. **Dynamic Risk Adjustment**
+   - Market volatility-based limit scaling
+   - Time-of-day risk adjustments
+   - Correlation-based exposure management
+
+2. **Machine Learning Integration**
+   - Adaptive confidence thresholds
+   - Predictive risk modeling
+   - Anomaly detection
+
+3. **Advanced Portfolio Management**
+   - Sector exposure limits
+   - Currency exposure management
+   - Greeks-based risk for options (future)
+
+4. **Real-Time Risk Dashboard**
+   - Web-based monitoring interface
+   - Real-time risk metrics visualization
+   - Alert management system

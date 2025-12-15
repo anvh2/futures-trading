@@ -6,18 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
+	"github.com/anvh2/futures-trading/internal/helpers"
 	"github.com/anvh2/futures-trading/internal/libs/talib"
 	"github.com/anvh2/futures-trading/internal/models"
 	"go.uber.org/zap"
 )
-
-func validateMessage(message *models.CandleSummary) error {
-	if message == nil {
-		return errors.New("analyze: message invalid")
-	}
-	return nil
-}
 
 func (s *Analyzer) process(ctx context.Context, data interface{}) error {
 	message := &models.CandleSummary{
@@ -26,11 +21,6 @@ func (s *Analyzer) process(ctx context.Context, data interface{}) error {
 
 	if err := json.Unmarshal([]byte(fmt.Sprint(data)), message); err != nil {
 		s.logger.Error("[Process] failed to unmarshal message", zap.Error(err))
-		return err
-	}
-
-	if err := validateMessage(message); err != nil {
-		s.logger.Error("[Process] failed to validate message", zap.Error(err))
 		return err
 	}
 
@@ -79,8 +69,32 @@ func (s *Analyzer) process(ctx context.Context, data interface{}) error {
 		return errors.New("analyze: not ready to trade")
 	}
 
-	// s.queue.Push(signal, )
+	signal := &models.Signal{
+		Symbol:     oscillator.Symbol,
+		Type:       models.SignalTypeEntry,
+		Action:     models.SignalAction(helpers.ResolvePositionSide(oscillator.GetRSI(s.settings.TradingInterval))),
+		Confidence: s.calculateConfidence(oscillator),
+		Strength:   s.calculateStrength(oscillator),
+		Interval:   s.settings.TradingInterval,
+		Strategy:   "oscillator-analysis",
+		Indicators: map[string]float64{
+			"rsi": oscillator.GetRSI(s.settings.TradingInterval),
+		},
+		Metadata: map[string]interface{}{
+			"oscillator":    oscillator,
+			"position_side": helpers.ResolvePositionSide(oscillator.GetRSI(s.settings.TradingInterval)),
+		},
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(10 * time.Minute),
+		IsActive:  true,
+	}
 
-	s.logger.Info("[Process] analyze success, end process", zap.String("symbol", message.Symbol))
+	s.signal.Ingest(signal)
+
+	if err := s.queue.Push(context.Background(), "signals", signal); err != nil {
+		s.logger.Error("[Process] failed to push signal to decision queue", zap.Error(err))
+		return err
+	}
+
 	return nil
 }

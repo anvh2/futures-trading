@@ -378,3 +378,138 @@ func (r *SystemStatusRule) Check(state *state.TradingState) *SafetyViolation {
 
 	return nil
 }
+
+// MarketVolatilityRule checks for extreme market volatility
+type MarketVolatilityRule struct{}
+
+func NewMarketVolatilityRule() *MarketVolatilityRule {
+	return &MarketVolatilityRule{}
+}
+
+func (r *MarketVolatilityRule) Name() string {
+	return "market_volatility"
+}
+
+func (r *MarketVolatilityRule) Priority() int {
+	return 85
+}
+
+func (r *MarketVolatilityRule) Check(state *state.TradingState) *SafetyViolation {
+	// Check for rapid PnL changes indicating extreme volatility
+	var unrealizedPnL float64
+	volatilePositions := 0
+
+	for _, position := range state.Positions {
+		if !position.IsActive {
+			continue
+		}
+
+		positionPnL := (position.CurrentPrice - position.EntryPrice) * position.Size
+		if position.Side == "SHORT" {
+			positionPnL = -positionPnL
+		}
+
+		unrealizedPnL += positionPnL
+
+		// Check for positions with large price swings
+		priceChange := ((position.CurrentPrice - position.EntryPrice) / position.EntryPrice) * 100
+		if priceChange < 0 {
+			priceChange = -priceChange
+		}
+
+		if priceChange > 5.0 { // 5% price change
+			volatilePositions++
+		}
+	}
+
+	// If more than half positions are volatile, trigger warning
+	totalPositions := len(state.Positions)
+	if totalPositions > 0 && float64(volatilePositions)/float64(totalPositions) >= 0.5 {
+		return &SafetyViolation{
+			RuleName:  r.Name(),
+			Severity:  SeverityHigh,
+			Message:   fmt.Sprintf("High market volatility detected: %d/%d positions showing >5%% price moves", volatilePositions, totalPositions),
+			Action:    ActionPauseTrading,
+			Timestamp: time.Now(),
+			Metadata: map[string]interface{}{
+				"volatile_positions": volatilePositions,
+				"total_positions":    totalPositions,
+				"unrealized_pnl":     unrealizedPnL,
+			},
+		}
+	}
+
+	return nil
+}
+
+// ConnectionHealthRule checks for connection and execution health
+type ConnectionHealthRule struct{}
+
+func NewConnectionHealthRule() *ConnectionHealthRule {
+	return &ConnectionHealthRule{}
+}
+
+func (r *ConnectionHealthRule) Name() string {
+	return "connection_health"
+}
+
+func (r *ConnectionHealthRule) Priority() int {
+	return 75
+}
+
+func (r *ConnectionHealthRule) Check(state *state.TradingState) *SafetyViolation {
+	// Check for stale data
+	timeSinceUpdate := time.Since(state.LastUpdated)
+	const maxStaleTime = time.Minute * 5
+
+	if timeSinceUpdate > maxStaleTime {
+		severity := SeverityMedium
+		action := ActionWarn
+
+		// If data is very stale, escalate
+		if timeSinceUpdate > time.Minute*15 {
+			severity = SeverityHigh
+			action = ActionPauseTrading
+		}
+
+		return &SafetyViolation{
+			RuleName:  r.Name(),
+			Severity:  severity,
+			Message:   fmt.Sprintf("Trading state data is stale: last update %v ago", timeSinceUpdate),
+			Action:    action,
+			Timestamp: time.Now(),
+			Metadata: map[string]interface{}{
+				"time_since_update": timeSinceUpdate.String(),
+				"max_stale_time":    maxStaleTime.String(),
+				"last_updated":      state.LastUpdated,
+			},
+		}
+	}
+
+	// Check for pending orders that are stuck
+	const maxPendingTime = time.Minute * 30
+	stuckOrders := 0
+
+	for _, order := range state.PendingOrders {
+		if time.Since(order.CreatedAt) > maxPendingTime {
+			stuckOrders++
+		}
+	}
+
+	if stuckOrders > 0 {
+		return &SafetyViolation{
+			RuleName:  r.Name(),
+			Severity:  SeverityMedium,
+			Message:   fmt.Sprintf("%d orders pending for over %v", stuckOrders, maxPendingTime),
+			Action:    ActionWarn,
+			Timestamp: time.Now(),
+			Metadata: map[string]interface{}{
+				"stuck_orders":     stuckOrders,
+				"max_pending_time": maxPendingTime.String(),
+				"total_pending":    len(state.PendingOrders),
+			},
+		}
+	}
+
+	return nil
+}

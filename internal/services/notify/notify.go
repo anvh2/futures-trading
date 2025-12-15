@@ -4,6 +4,7 @@ import (
 	"github.com/anvh2/futures-trading/internal/config"
 	"github.com/anvh2/futures-trading/internal/externals/binance"
 	"github.com/anvh2/futures-trading/internal/externals/telegram"
+	"github.com/anvh2/futures-trading/internal/libs/cache/simple"
 	"github.com/anvh2/futures-trading/internal/libs/logger"
 	"github.com/anvh2/futures-trading/internal/libs/queue"
 )
@@ -11,6 +12,7 @@ import (
 type Notifier struct {
 	config      config.Config
 	logger      *logger.Logger
+	cache       *simple.Cache
 	binance     *binance.Binance
 	notify      *telegram.TelegramBot
 	queue       *queue.Queue
@@ -27,6 +29,7 @@ func New(
 	return &Notifier{
 		config:      config,
 		logger:      logger,
+		cache:       simple.NewCache(),
 		binance:     binance,
 		notify:      notify,
 		queue:       queue,

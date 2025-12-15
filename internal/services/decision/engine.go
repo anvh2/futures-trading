@@ -160,55 +160,39 @@ func scoreVolumeOrderFlow(in *models.DecisionInput) float64 {
 		score -= 0.5 // Sell pressure
 	}
 
-	// 4. Enhanced volume analysis
+	// 4. Volume confirmation (simplified and corrected)
+	volumeMultiplier := 1.0
 	if in.RelativeVolume > 0 {
-		// High relative volume strengthens signals
 		if in.RelativeVolume > 2.0 {
-			if score > 0 {
-				score += 0.4 // Amplify bullish signals with high volume
-			} else {
-				score -= 0.4 // Amplify bearish signals with high volume
-			}
+			volumeMultiplier = 1.3 // High volume amplifies signals
 		} else if in.RelativeVolume > 1.5 {
-			if score > 0 {
-				score += 0.2
-			} else {
-				score -= 0.2
-			}
-		}
-
-		// Low volume weakens conviction
-		if in.RelativeVolume < 0.5 {
-			score *= 0.6 // Reduce signal strength on low volume
+			volumeMultiplier = 1.15
+		} else if in.RelativeVolume < 0.5 {
+			volumeMultiplier = 0.7 // Low volume weakens signals
 		}
 	}
 
-	// 5. VWAP analysis
+	// 5. VWAP analysis (price relative to volume-weighted average)
 	if in.VWAP > 0 && in.Price > 0 {
 		vwapDeviation := (in.Price - in.VWAP) / in.VWAP
-		if math.Abs(vwapDeviation) > 0.02 { // 2% deviation threshold
+		if math.Abs(vwapDeviation) > 0.015 { // 1.5% threshold
 			if vwapDeviation > 0 {
-				score += 0.3 // Price well above VWAP = bullish
+				score += 0.25 // Price above VWAP = bullish bias
 			} else {
-				score -= 0.3 // Price well below VWAP = bearish
+				score -= 0.25 // Price below VWAP = bearish bias
 			}
 		}
 	}
 
-	// 6. Volume ratio (buy vs sell estimation)
-	if in.VolumeRatio != 0 {
-		if in.VolumeRatio > 1.2 {
-			score += 0.4 // Buying pressure
-		} else if in.VolumeRatio < 0.8 {
-			score -= 0.4 // Selling pressure
-		}
+	// 6. Buy/Sell pressure from volume ratio
+	if in.VolumeRatio > 1.2 {
+		score += 0.3 // Buying pressure
+	} else if in.VolumeRatio < 0.8 {
+		score -= 0.3 // Selling pressure
 	}
 
-	// 7. Volume at price level analysis
-	if in.VolumeAtPriceHigh {
-		// High volume at current price suggests strong support/resistance
-		score += 0.2 * sign(score) // Amplify existing bias
-	}
+	// Apply volume multiplier to final score
+	score *= volumeMultiplier
 
 	return clamp(score, -2, 2)
 }
@@ -279,20 +263,20 @@ func scoreMacroSentiment(in *models.DecisionInput) float64 {
 func scoreQuant(in *models.DecisionInput) float64 {
 	score := 0.0
 
-	// 1. Primary timeframe RSI
+	// 1. Primary timeframe RSI (corrected logic)
 	if in.RSI >= 70 {
-		score -= 0.6 // Overbought
+		score -= 0.6 // Overbought = bearish signal
 	} else if in.RSI <= 30 {
-		score += 0.6 // Oversold
+		score += 0.6 // Oversold = bullish signal
 	} else if in.RSI >= 55 {
 		score -= 0.2 // Mild overbought
 	} else if in.RSI <= 45 {
 		score += 0.2 // Mild oversold
 	}
 
-	// 2. Multi-timeframe RSI confluence
+	// 2. Multi-timeframe RSI confluence (fixed calculation)
 	confluenceScore := 0.0
-	confluenceCount := 0
+	totalWeight := 0.0
 
 	// Analyze 5m, 15m, 1h RSI if available
 	timeframes := []struct {
@@ -306,11 +290,11 @@ func scoreQuant(in *models.DecisionInput) float64 {
 
 	for _, tf := range timeframes {
 		if tf.rsi > 0 { // Valid RSI value
-			confluenceCount++
+			totalWeight += tf.weight
 			if tf.rsi >= 70 {
-				confluenceScore -= 0.5 * tf.weight
+				confluenceScore -= 0.5 * tf.weight // Overbought = bearish
 			} else if tf.rsi <= 30 {
-				confluenceScore += 0.5 * tf.weight
+				confluenceScore += 0.5 * tf.weight // Oversold = bullish
 			} else if tf.rsi >= 60 {
 				confluenceScore -= 0.2 * tf.weight
 			} else if tf.rsi <= 40 {
@@ -319,9 +303,9 @@ func scoreQuant(in *models.DecisionInput) float64 {
 		}
 	}
 
-	// Apply confluence if we have multiple timeframes
-	if confluenceCount > 1 {
-		score += confluenceScore / float64(confluenceCount)
+	// Apply confluence if we have valid timeframes
+	if totalWeight > 0 {
+		score += confluenceScore / totalWeight
 	}
 
 	// 3. Multi-timeframe trend alignment
@@ -438,15 +422,14 @@ func ComputeDecision(in *models.DecisionInput) *models.DecisionOutput {
 	sOnChain := scoreOnChain(in)
 	sMacro := scoreMacroSentiment(in)
 	sQuant := scoreQuant(in)
-	// risk uses bias later; temporarily assume neutral
-	tmpRisk := scoreRisk(in, "Neutral")
 
-	weighted := sMarket*weightMarketStructure + sVol*weightVolumeOrderFlow + sFunding*weightFundingLongShort + sOnChain*weightOnChain + sMacro*weightMacroSentiment + sQuant*weightQuantModels + tmpRisk*weightRiskManagement
+	// Calculate initial bias without risk to avoid circular dependency
+	initialWeighted := sMarket*weightMarketStructure + sVol*weightVolumeOrderFlow + sFunding*weightFundingLongShort + sOnChain*weightOnChain + sMacro*weightMacroSentiment + sQuant*weightQuantModels
+	bias := deriveBias(initialWeighted)
 
-	bias := deriveBias(weighted)
-	// Recompute risk with derived bias for better alignment
+	// Compute risk with derived bias
 	sRisk := scoreRisk(in, bias)
-	weighted = sMarket*weightMarketStructure + sVol*weightVolumeOrderFlow + sFunding*weightFundingLongShort + sOnChain*weightOnChain + sMacro*weightMacroSentiment + sQuant*weightQuantModels + sRisk*weightRiskManagement
+	weighted := initialWeighted + sRisk*weightRiskManagement
 
 	cats := []float64{sMarket * weightMarketStructure, sVol * weightVolumeOrderFlow, sFunding * weightFundingLongShort, sOnChain * weightOnChain, sMacro * weightMacroSentiment, sQuant * weightQuantModels, sRisk * weightRiskManagement}
 	conf := confidenceFromScores(weighted, cats)

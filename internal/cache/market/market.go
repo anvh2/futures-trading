@@ -18,7 +18,7 @@ type Market struct {
 	limit int32
 }
 
-func NewMarket(limit int32) *Market {
+func New(limit int32) *Market {
 	return &Market{
 		mutex: &sync.Mutex{},
 		cache: make(map[string]*CandleSummary),

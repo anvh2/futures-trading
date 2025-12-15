@@ -2,10 +2,15 @@ package notify
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/anvh2/futures-trading/internal/libs/queue"
+	"github.com/anvh2/futures-trading/internal/models"
+	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
 
@@ -22,13 +27,14 @@ func (s *Notifier) SendSignal() error {
 		for {
 			select {
 			case <-ticker.C:
-				msg, err := s.queue.Consume(context.Background(), s.config.Topics.SymbolsTradeIntentTopic, "group1")
+				msg, err := s.queue.Consume(context.Background(), "signals", "notify-service")
 				if err != nil {
 					continue
 				}
 
 				if err := s.handleSignal(msg); err != nil {
 					s.logger.Error("[SendSignal] failed to handle signal", zap.Error(err))
+					msg.Commit(context.Background())
 					continue
 				}
 
@@ -44,32 +50,80 @@ func (s *Notifier) SendSignal() error {
 }
 
 func (s *Notifier) handleSignal(msg *queue.Message) error {
-	// var lastUpdate int64
-	// if message.Candles[s.settings.TradingInterval] != nil {
-	// 	lastUpdate = message.Candles[s.settings.TradingInterval].UpdateTime
-	// }
+	// Try to unmarshal the signal
+	signal, ok := msg.Data.(*models.Signal)
+	if !ok {
+		s.logger.Error("[handleSignal] invalid signal data type")
+		return errors.New("invalid signal data type")
+	}
 
-	// signal := fmt.Sprintf("#%s\t\t\t [%0.2f(s) ago]\n\t%s\n", message.Symbol, float64((time.Now().UnixMilli()-lastUpdate))/1000.0, helpers.ResolvePositionSide(oscillator.GetRSI(s.settings.TradingInterval)))
+	// Validate signal
+	if !signal.IsValid() {
+		s.logger.Debug("[handleSignal] signal is not valid or expired",
+			zap.String("symbol", signal.Symbol))
+		return nil
+	}
 
-	// for interval, stoch := range oscillator.Stoch {
-	// 	signal += fmt.Sprintf("\t%03s:\t RSI %2.2f | K %02.2f | D %02.2f\n", strings.ToUpper(interval), stoch.RSI, stoch.K, stoch.D)
-	// }
+	// Get position side from metadata
+	positionSideRaw, _ := signal.GetMetadata("position_side")
+	positionSide, _ := positionSideRaw.(string)
 
-	// lastSent, existed := s.cache.SetEX(fmt.Sprintf("signal.sent.%s-%s", message.Symbol, s.settings.TradingInterval), time.Now().UnixMilli())
-	// if existed && time.Now().Before(time.UnixMilli(lastSent.(int64)).Add(10*time.Minute)) {
-	// 	return errors.New("analyze: signal already sent")
-	// }
+	// Calculate time ago from creation
+	timeAgo := time.Since(signal.CreatedAt).Seconds()
 
-	// expiration, _ := time.ParseDuration(s.settings.TradingInterval)
-	// if err := s.queue.Push(oscillator, expiration); err != nil {
-	// 	s.logger.Error("[Process] failed to push queue", zap.Error(err))
-	// }
+	// Build signal message
+	signalMsg := fmt.Sprintf("#%s\t\t\t [%0.2f(s) ago]\n\t%s\n",
+		signal.Symbol,
+		timeAgo,
+		positionSide)
 
-	// err := s.notify.PushNotify(ctx, viper.GetInt64("notify.channels.futures_announcement"), signal)
-	// if err != nil {
-	// 	s.logger.Error("[Process] failed to push notification", zap.Error(err))
-	// 	return err
-	// }
+	// Add indicator values to message
+	if rsi, exists := signal.GetIndicatorValue("rsi"); exists {
+		signalMsg += fmt.Sprintf("\t%03s:\t RSI %2.2f",
+			strings.ToUpper(signal.Interval), rsi)
+	}
+
+	if k, exists := signal.GetIndicatorValue("k"); exists {
+		signalMsg += fmt.Sprintf(" | K %02.2f", k)
+	}
+
+	if d, exists := signal.GetIndicatorValue("d"); exists {
+		signalMsg += fmt.Sprintf(" | D %02.2f", d)
+	}
+
+	signalMsg += "\n"
+
+	// Add confidence and strength info
+	signalMsg += fmt.Sprintf("\tConfidence: %02.1f%% | Strength: %02.1f%% | Action: %s\n",
+		signal.Confidence*100,
+		signal.Strength*100,
+		signal.Action)
+
+	// Check rate limiting to avoid spam (if cache is available)
+	// Note: Remove this section if Notifier doesn't have cache field
+	cacheKey := fmt.Sprintf("signal.sent.%s-%s", signal.Symbol, signal.Interval)
+	lastSent, existed := s.cache.SetEX(cacheKey, time.Now().UnixMilli())
+	if existed && time.Now().Before(time.UnixMilli(lastSent.(int64)).Add(10*time.Minute)) {
+		s.logger.Debug("[handleSignal] signal already sent recently, skipping",
+			zap.String("symbol", signal.Symbol))
+		return nil
+	}
+
+	// Send notification
+	err := s.notify.PushNotify(context.Background(),
+		viper.GetInt64("notify.channels.futures_announcement"),
+		signalMsg)
+	if err != nil {
+		s.logger.Error("[handleSignal] failed to push notification",
+			zap.Error(err),
+			zap.String("symbol", signal.Symbol))
+		return err
+	}
+
+	s.logger.Info("[handleSignal] signal notification sent successfully",
+		zap.String("symbol", signal.Symbol),
+		zap.String("action", string(signal.Action)),
+		zap.Float64("confidence", signal.Confidence))
 
 	return nil
 }

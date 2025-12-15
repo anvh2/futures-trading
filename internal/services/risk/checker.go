@@ -1,7 +1,12 @@
 package risk
 
 import (
+	"context"
+	"runtime/debug"
+	"time"
+
 	"github.com/anvh2/futures-trading/internal/libs/logger"
+	"github.com/anvh2/futures-trading/internal/libs/queue"
 	"github.com/anvh2/futures-trading/internal/models"
 	"github.com/anvh2/futures-trading/internal/services/guard"
 	"github.com/anvh2/futures-trading/internal/services/state"
@@ -11,14 +16,18 @@ import (
 // Checker interface defines the risk checking capabilities
 type Checker interface {
 	CheckDecision(decision *models.TradingDecision) bool
+	Start() error // Start queue processing
+	Stop()        // Stop processing
 }
 
 // Checker implementation
 type CheckerImpl struct {
-	logger *logger.Logger
-	config *Config
-	state  *state.StateManager
-	guard  *guard.SafetyGuard
+	logger      *logger.Logger
+	config      *Config
+	state       *state.StateManager
+	guard       *guard.SafetyGuard
+	queue       *queue.Queue
+	quitChannel chan struct{}
 }
 
 // NewChecker creates a new risk checker
@@ -27,6 +36,7 @@ func NewChecker(
 	config *Config,
 	stateManager *state.StateManager,
 	safetyGuard *guard.SafetyGuard,
+	queue *queue.Queue,
 ) Checker {
 	if config == nil {
 		defaultConfig := DefaultConfig()
@@ -34,10 +44,12 @@ func NewChecker(
 	}
 
 	return &CheckerImpl{
-		logger: logger,
-		config: config,
-		state:  stateManager,
-		guard:  safetyGuard,
+		logger:      logger,
+		config:      config,
+		state:       stateManager,
+		guard:       safetyGuard,
+		queue:       queue,
+		quitChannel: make(chan struct{}),
 	}
 }
 
@@ -75,11 +87,105 @@ func (re *CheckerImpl) CheckDecision(decision *models.TradingDecision) bool {
 		return false
 	}
 
+	// 6. Check guard safety violations
+	if !re.checkGuardSafety(decision) {
+		return false
+	}
+
+	// 7. Check exposure limits
+	if !re.checkExposureLimits(decision) {
+		return false
+	}
+
+	// 8. Check correlations and diversification
+	if !re.checkCorrelationLimits(decision) {
+		return false
+	}
+
 	re.logger.Info("Decision approved by risk engine",
 		zap.String("symbol", decision.Symbol),
 		zap.String("action", decision.Action))
 
 	return true
+}
+
+// Start begins the queue processing goroutine
+func (re *CheckerImpl) Start() error {
+	if err := re.handleDecisions(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Stop stops the queue processing
+func (re *CheckerImpl) Stop() {
+	close(re.quitChannel)
+}
+
+// handleDecisions processes trading decisions from the queue
+func (re *CheckerImpl) handleDecisions() error {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				re.logger.Error("[handleDecisions] failed to process", zap.Any("error", r), zap.String("stacktrace", string(debug.Stack())))
+			}
+		}()
+
+		ticker := time.NewTicker(2 * time.Second)
+
+		for {
+			select {
+			case <-ticker.C:
+				msg, err := re.queue.Consume(context.Background(), "decisions", "risk-checker")
+				if err != nil {
+					continue
+				}
+
+				if err := re.handleDecision(msg); err != nil {
+					re.logger.Error("[handleDecisions] failed to handle decision", zap.Error(err))
+					msg.Commit(context.Background())
+					continue
+				}
+
+				msg.Commit(context.Background())
+
+			case <-re.quitChannel:
+				return
+			}
+		}
+	}()
+
+	return nil
+}
+
+// handleDecision processes a single trading decision message
+func (re *CheckerImpl) handleDecision(msg *queue.Message) error {
+	decision, ok := msg.Data.(*models.TradingDecision)
+	if !ok {
+		return nil
+	}
+
+	// Check if decision passes risk validation
+	if !re.CheckDecision(decision) {
+		re.logger.Info("Decision rejected by risk engine",
+			zap.String("symbol", decision.Symbol),
+			zap.String("action", decision.Action))
+		return nil
+	}
+
+	// Decision approved - forward to executor queue
+	if err := re.queue.Push(context.Background(), "approved-orders", decision); err != nil {
+		re.logger.Error("Failed to push approved decision to executor queue", zap.Error(err))
+		return err
+	}
+
+	re.logger.Info("Decision approved and forwarded to executor",
+		zap.String("symbol", decision.Symbol),
+		zap.String("action", decision.Action),
+		zap.Float64("size", decision.Size))
+
+	return nil
 }
 
 // checkPositionLimits checks if the decision violates position limits
@@ -173,6 +279,108 @@ func (re *CheckerImpl) checkConfidenceThresholds(decision *models.TradingDecisio
 			zap.Float64("confidence", decision.Confidence),
 			zap.Float64("min_required", minRequired),
 			zap.String("action", decision.Action))
+		return false
+	}
+
+	return true
+}
+
+// checkGuardSafety checks if the guard system allows trading
+func (re *CheckerImpl) checkGuardSafety(decision *models.TradingDecision) bool {
+	// Check if any circuit breakers are triggered that would prevent trading
+	status := re.guard.GetStatus()
+
+	for name, breaker := range status {
+		if breaker.Status == guard.CircuitBreakerStatus("TRIGGERED") &&
+			time.Now().Before(breaker.CooldownUntil) {
+			re.logger.Info("Decision rejected - circuit breaker active",
+				zap.String("breaker", name),
+				zap.Time("cooldown_until", breaker.CooldownUntil))
+			return false
+		}
+	}
+
+	// Perform real-time safety check
+	violations := re.guard.CheckSafety()
+	for _, violation := range violations {
+		if violation.Severity == guard.ViolationSeverity("CRITICAL") ||
+			violation.Severity == guard.ViolationSeverity("HIGH") {
+			if violation.Action == guard.RecommendedAction("PAUSE_TRADING") ||
+				violation.Action == guard.RecommendedAction("EMERGENCY_STOP") {
+				re.logger.Info("Decision rejected - safety violation detected",
+					zap.String("rule", violation.RuleName),
+					zap.String("severity", string(violation.Severity)),
+					zap.String("action", string(violation.Action)))
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+// checkExposureLimits checks portfolio exposure limits
+func (re *CheckerImpl) checkExposureLimits(decision *models.TradingDecision) bool {
+	riskMetrics := re.state.GetRiskMetrics()
+	if riskMetrics == nil {
+		return true // No limits set
+	}
+
+	// Check total exposure ratio
+	positions := re.state.GetPositions()
+	totalExposure := 0.0
+
+	for _, position := range positions {
+		totalExposure += position.Size * position.EntryPrice
+	}
+
+	// Add potential exposure from this decision
+	if decision.Action == "BUY" || decision.Action == "SELL" {
+		totalExposure += decision.Size * decision.Price
+	}
+
+	// Check against account balance (assuming 100k for now - should be configurable)
+	accountBalance := 100000.0 // Should come from account service
+	exposureRatio := totalExposure / accountBalance
+
+	maxExposureRatio := 0.8 // 80% max exposure
+	if exposureRatio > maxExposureRatio {
+		re.logger.Info("Decision rejected - exposure limit exceeded",
+			zap.Float64("exposure_ratio", exposureRatio),
+			zap.Float64("max_exposure_ratio", maxExposureRatio))
+		return false
+	}
+
+	return true
+}
+
+// checkCorrelationLimits checks position correlation and diversification
+func (re *CheckerImpl) checkCorrelationLimits(decision *models.TradingDecision) bool {
+	if decision.Action != "BUY" && decision.Action != "SELL" {
+		return true // Only check for new positions
+	}
+
+	positions := re.state.GetPositions()
+
+	// Simple correlation check: limit similar assets
+	// In production, this should use actual correlation matrices
+	symbol := decision.Symbol
+	baseAsset := symbol[:3] // Extract base asset (e.g., BTC from BTCUSDT)
+
+	sameAssetPositions := 0
+	for _, position := range positions {
+		if position.Symbol[:3] == baseAsset {
+			sameAssetPositions++
+		}
+	}
+
+	// Limit to 2 positions per base asset
+	maxSameAsset := 2
+	if sameAssetPositions >= maxSameAsset {
+		re.logger.Info("Decision rejected - too many positions in same asset",
+			zap.String("base_asset", baseAsset),
+			zap.Int("current_positions", sameAssetPositions),
+			zap.Int("max_allowed", maxSameAsset))
 		return false
 	}
 

@@ -1,345 +1,226 @@
-# Decision Engine Service Specification
+# Combined Decision Making System
 
 ## Overview
-The Decision Engine Service implements a sophisticated quantitative trading decision system based on multi-factor analysis. It processes market data, applies weighted scoring across 7 categories, and generates structured trade recommendations with confidence levels.
+
+This document explains the integrated decision-making system that combines signal-based trading with a comprehensive scoring engine for futures trading. The system provides sophisticated, multi-factor analysis for trading decisions.
 
 ## Architecture
-- **Package**: `internal/services/decision`
-- **Type**: Stateless calculation engine
-- **Dependencies**: Risk management service
-- **Design Pattern**: Functional scoring system with weighted aggregation
 
-## Core Components
+### Core Components
 
-### 1. Decision Input Structure
+1. **Signal Processing**: Converts trading signals with technical indicators into structured decision inputs
+2. **Scoring Engine**: Applies weighted scoring across 7 categories of market analysis
+3. **Decision Output**: Generates comprehensive trading decisions with risk management
+
+### Data Flow
+
+```
+Trading Signal → DecisionInput → Scoring Engine → DecisionOutput → TradingDecision
+```
+
+## Key Features
+
+### 1. Multi-Category Scoring System
+
+The engine evaluates seven weighted categories:
+
+- **Market Structure (25%)**: Breakouts, support/resistance, trend analysis
+- **Volume & Order Flow (20%)**: Spot/futures volume, order book, VWAP analysis  
+- **Funding & Long/Short (15%)**: Funding rates, positioning sentiment
+- **On-Chain Analysis (10%)**: Exchange flows, whale activity
+- **Macro Sentiment (10%)**: News sentiment, fear/greed index
+- **Quantitative Models (15%)**: Multi-timeframe RSI, KDJ oscillators
+- **Risk Management (5%)**: ATR volatility, position conflicts
+
+### 2. Multi-Timeframe Analysis
+
+- **5-minute**: Short-term momentum
+- **15-minute**: Medium-term trend
+- **1-hour**: Primary trend direction
+
+### 3. Sophisticated Risk Management
+
+- **Position Sizing**: ATR-adjusted, confidence-based sizing
+- **Leverage Calculation**: Dynamic based on volatility and confidence
+- **Stop Loss/Take Profit**: ATR-based levels
+- **Scale-in/Scale-out**: Progressive position management
+
+### 4. Decision Confidence
+
+Confidence is calculated based on:
+- Signal magnitude across categories
+- Agreement between different analysis methods
+- Market volatility conditions
+
+## Usage
+
+### Basic Decision Making
+
 ```go
-type DecisionInput struct {
-    // Technical Indicators
-    RSI                 float64
-    KDJ_K               float64
-    KDJ_D               float64
-    KDJ_J               float64
-    ATR_Percent         float64
-    
-    // Price Data
-    Price               float64
-    RecentHigh          float64
-    RecentLow           float64
-    SupportLevel        float64
-    ResistanceLevel     float64
-    SwingHighBroken     bool
-    SwingLowBroken      bool
-    
-    // Volume & Order Flow
-    SpotVolumeChange    float64
-    FuturesVolumeChange float64
-    OpenInterestChange  float64
-    OrderBookImbalance  float64
-    
-    // Market Sentiment
-    FundingRate         float64
-    LongShortRatio      float64
-    ExchangeInflows     float64
-    WhaleTransactions   int
-    SpotFuturesPremium  float64
-    
-    // Macro & Sentiment
-    MacroSentimentScore float64
-    NewsSentimentScore  float64
-    FearGreedIndex      float64
-    
-    // Risk Parameters
-    Capital             float64
-    CurrentPosition     float64
-    MaxPositionSize     float64
+// Create a signal with comprehensive indicator data
+signal := &models.Signal{
+    Symbol:     "BTCUSDT",
+    Price:      45000.0,
+    Interval:   "1h",
+    Strategy:   "comprehensive",
+    Indicators: map[string]float64{
+        "rsi":              35.0,
+        "k":                25.0,
+        "d":                20.0,
+        "atr_percent":      2.5,
+        "vwap":            44800.0,
+        "funding_rate":     0.01,
+        "long_short_ratio": 1.3,
+        // ... more indicators
+    },
+    // ... metadata for trends, swing breaks, etc.
+}
+
+// Generate decision using the integrated system
+decision := decisionMaker.MakeDecision(signal)
+```
+
+### Advanced Usage
+
+```go
+// Get detailed engine output for analysis
+engineOutput := decisionMaker.GetEngineDecision(signal)
+
+fmt.Printf("Prediction: %s\\n", engineOutput.Prediction)
+fmt.Printf("Confidence: %d%%\\n", engineOutput.Confidence) 
+fmt.Printf("Total Score: %.2f\\n", engineOutput.TotalScore)
+fmt.Printf("Reasoning: %s\\n", engineOutput.Reasoning)
+```
+
+## Signal Requirements
+
+### Required Indicators
+
+**Technical Analysis:**
+- `rsi`: Primary RSI (0-100)
+- `k`, `d`, `j`: KDJ oscillator values
+- `atr_percent`: ATR as percentage of price
+- `vwap`: Volume Weighted Average Price
+
+**Market Structure:**
+- `recent_high`, `recent_low`: Recent price extremes
+- `support_level`, `resistance_level`: Key levels
+- `trend_strength`: Trend strength indicator (0-100)
+
+**Volume Analysis:**
+- `relative_volume`: Volume vs average (1.0 = normal)
+- `volume_ratio`: Buy/sell volume ratio
+- `spot_volume_change`, `futures_volume_change`: Volume changes
+
+**Funding & Positioning:**
+- `funding_rate`: Current funding rate
+- `long_short_ratio`: Long vs short positioning
+- `oi_change`: Open interest change
+
+### Required Metadata
+
+**Multi-timeframe Trends:**
+- `trend_5m`, `trend_15m`, `trend_1h`: "UP", "DOWN", or "SIDEWAYS"
+
+**Market Structure:**
+- `swing_high_broken`, `swing_low_broken`: Boolean swing break flags
+
+## Decision Output
+
+### TradingDecision Structure
+
+```go
+type TradingDecision struct {
+    Symbol     string    // Trading symbol
+    Action     string    // "BUY", "SELL", "HOLD"  
+    Size       float64   // Position size in base currency
+    Price      float64   // Entry price
+    Confidence float64   // Confidence (0-1)
+    Timestamp  time.Time // Decision timestamp
+    Metadata   map[string]interface{} // Rich decision data
 }
 ```
 
-### 2. Decision Output Structure
-```go
-type DecisionOutput struct {
-    Prediction          string  // "Bump" | "Dump" | "Sideways"
-    Confidence          int     // 0-100
-    Bias                string  // "Bullish" | "Bearish" | "Neutral"
-    TotalScore          float64
-    CategoryScores      CategoryScores
-    Action              string  // "Long" | "Short" | "Hold"
-    PositionSizePercent float64
-    Leverage            float64
-    EntryPrice          float64
-    StopLoss            float64
-    TakeProfit          float64
-    ScaleInPlan         string
-    ScaleOutPlan        string
-    Reasoning           string
-}
+### Rich Metadata
 
-type CategoryScores struct {
-    MarketStructure     float64
-    VolumeOrderFlow     float64
-    FundingLongShort    float64
-    OnChain             float64
-    MacroSentiment      float64
-    QuantModels         float64
-    RiskManagement      float64
-}
+The decision includes comprehensive metadata:
+
+- **prediction**: "Bump", "Dump", or "Sideways"
+- **bias**: "Bullish", "Bearish", or "Neutral"
+- **total_score**: Composite score (-2 to 2)
+- **category_scores**: Individual category contributions
+- **position_size_pct**: Position size as percentage of capital
+- **leverage**: Recommended leverage (1-10)
+- **stop_loss**: Calculated stop loss level
+- **take_profit**: Calculated take profit level
+- **scale_in_plan**: Position scaling strategy
+- **scale_out_plan**: Exit scaling strategy  
+- **reasoning**: Human-readable explanation
+
+## Configuration
+
+### Risk Parameters
+
+Default risk configuration (configurable):
+
+```go
+- Max Position Size: 10% of capital
+- Max Leverage: 10x (adjusted by volatility)
+- Min Confidence: 60% for trade execution
+- ATR Stop Loss: 2x ATR
+- ATR Take Profit: 3x ATR
 ```
 
-## Scoring System
+### Scoring Thresholds
 
-### 1. Category Weights (TRADE.md Alignment)
-```go
-const (
-    weightMarketStructure  = 0.25  // 25%
-    weightVolumeOrderFlow  = 0.20  // 20%
-    weightFundingLongShort = 0.15  // 15%
-    weightOnChain          = 0.10  // 10%
-    weightMacroSentiment   = 0.10  // 10%
-    weightQuantModels      = 0.15  // 15%
-    weightRiskManagement   = 0.05  // 5%
-)
+- **Long Threshold**: 0.8 (composite score)
+- **Short Threshold**: -0.8 (composite score)
+- **Neutral Zone**: Between -0.8 and 0.8
+
+## Testing
+
+The system includes comprehensive tests:
+
+```bash
+# Run integration tests
+go test ./internal/services/decision -v -run TestIntegratedDecisionMaking
+
+# Run edge case tests  
+go test ./internal/services/decision -v -run TestEdgeCases
+
+# Run benchmarks
+go test ./internal/services/decision -bench=BenchmarkDecisionMaking
 ```
 
-### 2. Individual Scoring Functions
+## Best Practices
 
-#### Market Structure & Price Action (25%)
-```go
-func scoreMarketStructure(in *DecisionInput) float64
-```
-**Analysis Points:**
-- **Breakout/Breakdown Detection**: ±2.0 for strong price breaks above/below recent highs/lows
-- **Support/Resistance Proximity**: ±0.8 for prices near key levels
-- **Range Position Analysis**: Position within trading range affects bias
-- **Swing Level Confirmation**: Additional weight for broken swing points
+### 1. Signal Quality
+- Ensure all critical indicators are populated
+- Validate signal data before processing
+- Use consistent timeframe analysis
 
-#### Volume & Order Flow (20%)
-```go
-func scoreVolumeOrderFlow(in *DecisionInput) float64
-```
-**Analysis Points:**
-- **Volume Divergence**: Compare spot vs futures volume changes
-- **Open Interest Analysis**: Rising OI + price direction = trend confirmation
-- **Order Book Imbalance**: Positive = buy pressure, Negative = sell pressure
-- **Volume Confirmation**: High volume supports directional moves
+### 2. Risk Management
+- Never ignore engine confidence levels
+- Respect position sizing recommendations
+- Monitor ATR volatility conditions
 
-#### Funding & Long/Short Ratio (15%)
-```go
-func scoreFundingLongShort(in *DecisionInput) float64
-```
-**Analysis Points:**
-- **Funding Rate Analysis**: Extreme rates indicate potential squeezes
-- **Long/Short Ratio**: Extreme imbalances suggest reversal opportunities
-- **Leverage Positioning**: Over-leveraged positions create instability
-- **Contrarian Signals**: High funding = potential opposite direction move
-
-#### On-Chain Data (10%)
-```go
-func scoreOnChain(in *DecisionInput) float64
-```
-**Analysis Points:**
-- **Exchange Flows**: Inflows = selling pressure, Outflows = accumulation
-- **Whale Activity**: Large transaction counts indicate major moves
-- **Spot-Futures Premium**: Extreme premiums suggest overheated sentiment
-- **Network Activity**: Transaction volume and fees analysis
-
-#### Macro & Sentiment (10%)
-```go
-func scoreMacroSentiment(in *DecisionInput) float64
-```
-**Analysis Points:**
-- **Global Risk Appetite**: Correlation with traditional markets
-- **News Impact**: Regulatory, adoption, and ecosystem developments
-- **Fear & Greed Index**: Extreme readings for contrarian opportunities
-- **Market Correlation**: Bitcoin dominance and altcoin relationships
-
-#### Quantitative Models (15%)
-```go
-func scoreQuantModels(in *DecisionInput) float64
-```
-**Analysis Points:**
-- **RSI Analysis**: Overbought/oversold conditions and divergences
-- **KDJ Stochastic**: K/D crossovers and J-line extremes
-- **Mean Reversion vs Momentum**: Determine market regime
-- **Volatility Analysis**: ATR-based regime detection
-
-#### Risk Management (5%)
-```go
-func scoreRiskManagement(in *DecisionInput) float64
-```
-**Analysis Points:**
-- **Position Sizing**: Adherence to max position limits
-- **Portfolio Exposure**: Current risk vs maximum allowable
-- **Volatility Adjustment**: ATR-based position size scaling
-- **Capital Preservation**: Drawdown protection mechanisms
-
-## Decision Logic
-
-### 1. Score Aggregation
-```go
-func calculateTotalScore(scores CategoryScores) float64 {
-    return scores.MarketStructure*weightMarketStructure +
-           scores.VolumeOrderFlow*weightVolumeOrderFlow +
-           scores.FundingLongShort*weightFundingLongShort +
-           scores.OnChain*weightOnChain +
-           scores.MacroSentiment*weightMacroSentiment +
-           scores.QuantModels*weightQuantModels +
-           scores.RiskManagement*weightRiskManagement
-}
-```
-
-### 2. Decision Thresholds
-```go
-const (
-    longThreshold  = 0.8   // ≥ 0.8 = Bullish bias (Long)
-    shortThreshold = -0.8  // ≤ -0.8 = Bearish bias (Short)
-)
-```
-
-### 3. Confidence Calculation
-- **Base Confidence**: Absolute value of total score * 50
-- **Category Agreement**: Bonus for aligned category scores
-- **Signal Strength**: Additional confidence for extreme readings
-- **Risk Adjustment**: Reduction for high volatility environments
-
-### 4. Position Sizing Algorithm
-```go
-func calculatePositionSize(totalScore, capital, atr float64) (float64, float64) {
-    // Base size: 2-5% of capital based on confidence
-    baseSize := math.Abs(totalScore) * 0.025 * capital
-    
-    // Volatility adjustment
-    volAdjustment := math.Max(0.5, math.Min(2.0, 1.0/atr))
-    
-    // Final position size
-    positionSize := baseSize * volAdjustment
-    
-    // Leverage calculation (2x-10x based on confidence)
-    leverage := math.Max(2.0, math.Min(10.0, math.Abs(totalScore)*5))
-    
-    return positionSize, leverage
-}
-```
-
-## Risk Controls
-
-### 1. Entry Validation
-- **Minimum Confidence**: 60% threshold for trade execution
-- **Maximum Position**: 5% of total capital per trade
-- **Volatility Limits**: No trades during extreme volatility
-- **Market Hours**: Avoid low-liquidity periods
-
-### 2. Stop Loss Calculation
-```go
-func calculateStopLoss(entryPrice, atr float64, isLong bool) float64 {
-    stopDistance := atr * 2.0 // 2x ATR stop distance
-    
-    if isLong {
-        return entryPrice - stopDistance
-    }
-    return entryPrice + stopDistance
-}
-```
-
-### 3. Take Profit Levels
-```go
-func calculateTakeProfit(entryPrice, stopLoss float64, isLong bool) float64 {
-    riskAmount := math.Abs(entryPrice - stopLoss)
-    rewardMultiple := 2.0 // 2:1 reward-to-risk ratio
-    
-    if isLong {
-        return entryPrice + (riskAmount * rewardMultiple)
-    }
-    return entryPrice - (riskAmount * rewardMultiple)
-}
-```
-
-## Scaling Strategies
-
-### 1. Scale-In Plan
-- **Initial Position**: 50% of calculated size
-- **Scale-In 1**: 30% if price moves favorably by 0.5% 
-- **Scale-In 2**: 20% if price moves favorably by 1.0%
-- **Condition**: Only scale-in if original thesis strengthens
-
-### 2. Scale-Out Plan
-- **Partial Profit**: 50% at 1:1 risk-reward
-- **Runner Position**: 50% targeting 1:3 risk-reward
-- **Trailing Stop**: Move stop to breakeven after 1:1 target
-- **Final Exit**: Trail stop using ATR-based levels
+### 3. Performance
+- Cache frequently accessed data
+- Use appropriate timeframe for signal generation
+- Consider market conditions in signal creation
 
 ## Error Handling
 
-### 1. Input Validation
-```go
-func validateInput(in *DecisionInput) error {
-    if in.Price <= 0 {
-        return errors.New("invalid price")
-    }
-    if in.Capital <= 0 {
-        return errors.New("invalid capital")
-    }
-    // Additional validations...
-}
-```
-
-### 2. Boundary Checks
-- **Score Clamping**: All scores limited to [-2, 2] range
-- **Confidence Limits**: Bounded to [0, 100]
-- **Position Sizing**: Maximum 5% of capital enforcement
-- **Leverage Limits**: Capped at 10x maximum
-
-## Integration Points
-
-### 1. Input Sources
-- **Analyze Service**: Technical indicator calculations (RSI, KDJ)
-- **Market Service**: Price action and structure analysis
-- **Risk Service**: Portfolio and exposure calculations
-- **External APIs**: Sentiment and macro data feeds
-
-### 2. Output Consumers
-- **Order Service**: Trade execution based on decisions
-- **Risk Service**: Portfolio updates and monitoring
-- **Notification Service**: Alert generation and reporting
-- **Analytics Service**: Performance tracking and optimization
-
-## Performance Characteristics
-
-### 1. Computational Complexity
-- **O(1)**: All scoring functions are constant time
-- **Memory**: Minimal allocation, stateless operation
-- **Throughput**: >1000 decisions per second capability
-- **Latency**: <10ms average decision time
-
-### 2. Accuracy Metrics
-- **Win Rate Target**: >55% profitable trades
-- **Risk-Reward**: Maintain >1.5:1 average
-- **Drawdown Limit**: <15% maximum portfolio drawdown
-- **Sharpe Ratio**: Target >2.0 annually
-
-## Monitoring & Validation
-
-### 1. Decision Quality Metrics
-- **Score Distribution**: Monitor category score patterns
-- **Confidence vs Outcome**: Validate confidence accuracy
-- **Category Performance**: Track individual category effectiveness
-- **Threshold Optimization**: Periodic review of decision thresholds
-
-### 2. Backtesting Framework
-- **Historical Validation**: Test decisions against past market data
-- **Paper Trading**: Live validation without real money
-- **Performance Attribution**: Identify contributing factors
-- **Strategy Evolution**: Continuous improvement based on results
+The system gracefully handles:
+- Missing indicator values (defaults to 0)
+- Invalid signal data (returns nil)
+- Extreme market conditions (adjusts confidence)
+- Position conflicts (reduces scoring)
 
 ## Future Enhancements
 
-### 1. Machine Learning Integration
-- **Pattern Recognition**: Deep learning for market patterns
-- **Adaptive Weights**: Dynamic category weight adjustment
-- **Sentiment Analysis**: NLP for news and social media
-- **Regime Detection**: Automatic market state identification
-
-### 2. Advanced Risk Management
-- **Portfolio Optimization**: Modern Portfolio Theory integration
-- **Correlation Analysis**: Cross-asset risk assessment
-- **Dynamic Hedging**: Automatic hedging strategies
-- **Stress Testing**: Scenario-based risk evaluation
+Potential improvements:
+- Machine learning model integration
+- Dynamic parameter optimization
+- Enhanced multi-asset correlation
+- Real-time sentiment analysis integration
